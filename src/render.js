@@ -1,79 +1,120 @@
 /*
- * render.js — draw the sim onto a 2D canvas.
- * ==========================================
- * Pure drawing: given a canvas context, a Sim, and a Camera, paint the
- * ground and every body. No physics mutation happens here.
+ * render.js — draw a sim onto a 2D canvas, glass-on-gradient style.
+ * ================================================================
+ * Pure drawing: given a canvas context, a Sim, and a Camera, paint a soft
+ * translucent lane "card", a gentle ground band, and every body as a rounded,
+ * softly-shadowed segment. No physics mutation happens here.
  *
- * Bodies are drawn by reading each planck Body's live transform
- * (position + angle) and its fixture shape. We support box (polygon) and
- * circle fixtures — the two shapes the creature schema allows. World meters
- * are converted to screen pixels via the camera (which applies the y-flip).
+ * The canvas is TRANSPARENT over the page's animated gradient sky (main.js
+ * clears it each frame with clearRect), so everything we paint is translucent
+ * glass on top of that gradient — the physics view and the UI feel like one
+ * cohesive frosted-glass design.
  *
- * Coloring follows CONFIG.colors: root, foot, and generic limb are distinct,
- * and each joint pivot gets a small dot so the articulation is visible.
+ * GRID-AWARE: a Camera carries its own viewport RECT (offsetX/offsetY +
+ * viewW/viewH, see camera.js). `drawSim` clips to a rounded version of that
+ * rect so many lanes tile one canvas, each in its own glass cell. The classic
+ * fullscreen path is just a camera with offset 0,0 covering the whole canvas;
+ * `drawScene` is kept as a back-compat alias.
+ *
+ * World meters are converted to screen pixels via the camera (which applies
+ * the y-flip and its own PPM). Colors/softness come from CONFIG.theme.
  */
 
 import { CONFIG } from './config.js';
 
-// planck global (for shape type sniffing via getType()).
-const planck = /** @type {any} */ (globalThis).planck;
+/** Path a rounded rectangle (uses native roundRect when present). */
+function roundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, rr);
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
 
 /**
- * drawScene(ctx, sim, camera) — render one frame. Assumes ctx is already
- * scaled for devicePixelRatio (so we can draw in CSS pixels).
+ * drawSim(ctx, sim, camera) — render one sim into the camera's glass cell.
+ * Assumes ctx is already scaled for devicePixelRatio (we draw in CSS pixels)
+ * and that the canvas has been cleared for this frame by the caller.
  */
-export function drawScene(ctx, sim, camera) {
-  const C = CONFIG.colors;
+export function drawSim(ctx, sim, camera) {
+  const T = CONFIG.theme;
+  const ox = camera.offsetX || 0;
+  const oy = camera.offsetY || 0;
+  const inset = 4; // small gap so cells read as separate floating cards
 
-  // --- Clear background ---
   ctx.save();
-  ctx.fillStyle = C.background;
-  ctx.fillRect(0, 0, camera.viewW, camera.viewH);
+  // Rounded translucent cell "card", clipped so lanes don't bleed together.
+  roundRectPath(ctx, ox + inset, oy + inset, camera.viewW - 2 * inset, camera.viewH - 2 * inset, T.cellRadius);
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = T.cellPanel;
+  ctx.fillRect(ox, oy, camera.viewW, camera.viewH);
 
-  // --- Ground: a filled slab from y=0 down to the bottom of the screen. ---
-  drawGround(ctx, camera, C);
+  drawGround(ctx, camera, T);
 
-  // --- Bodies ---
-  for (const [id, body] of sim.bodies) {
+  // --- Bodies (soft, rounded, gently shadowed) ---
+  for (const [, body] of sim.bodies) {
     const ud = body.getUserData() || {};
-    let color = C.limb;
-    if (ud.isRoot) color = C.root;
-    else if (ud.isFoot) color = C.foot;
-    drawBody(ctx, camera, body, color, C.outline);
+    let color = T.limb;
+    if (ud.isRoot) color = T.root;
+    else if (ud.isFoot) color = T.foot;
+    drawBody(ctx, camera, body, color, T);
   }
 
-  // --- Joint pivot dots ---
-  ctx.fillStyle = C.joint;
-  for (const [id, joint] of sim.joints) {
-    // Anchor A in world space tracks the shared pivot.
+  // --- Joint markers (subtle) ---
+  ctx.fillStyle = T.joint;
+  for (const [, joint] of sim.joints) {
     const a = joint.getAnchorA();
     const s = camera.worldToScreen(a.x, a.y);
     ctx.beginPath();
-    ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore(); // end clip
 
+  // Glass edge around the cell.
+  roundRectPath(ctx, ox + inset, oy + inset, camera.viewW - 2 * inset, camera.viewH - 2 * inset, T.cellRadius);
+  ctx.strokeStyle = T.cellBorder;
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.restore();
 }
 
-/** Fill everything below world y=0 as ground, with a bright surface line. */
-function drawGround(ctx, camera, C) {
+// Back-compat name for callers that render a single fullscreen sim.
+export const drawScene = drawSim;
+
+/** Soft translucent ground band with a gentle highlight line. */
+function drawGround(ctx, camera, T) {
   const gy = CONFIG.ground.y;
-  const left = camera.worldToScreen(-CONFIG.ground.halfWidth, gy);
-  const right = camera.worldToScreen(CONFIG.ground.halfWidth, gy);
-  const surfaceY = left.y; // both ends share the same y at constant world y
-  ctx.fillStyle = C.ground;
-  ctx.fillRect(0, surfaceY, camera.viewW, camera.viewH - surfaceY);
-  ctx.strokeStyle = C.groundLine;
+  const surfaceY = camera.worldToScreen(0, gy).y;
+  const ox = camera.offsetX || 0;
+  const oy = camera.offsetY || 0;
+  const bottom = oy + camera.viewH;
+  if (surfaceY < bottom) {
+    const grad = ctx.createLinearGradient(0, surfaceY, 0, bottom);
+    grad.addColorStop(0, T.groundBand);
+    grad.addColorStop(1, 'rgba(255,255,255,0.02)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(ox, surfaceY, camera.viewW, bottom - surfaceY);
+  }
+  ctx.strokeStyle = T.groundEdge;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(0, surfaceY);
-  ctx.lineTo(camera.viewW, surfaceY);
+  ctx.moveTo(ox, surfaceY);
+  ctx.lineTo(ox + camera.viewW, surfaceY);
   ctx.stroke();
 }
 
-/** Draw a single dynamic body (box polygon or circle) at its live transform. */
-function drawBody(ctx, camera, body, fill, stroke) {
+/** Draw one dynamic body (rounded box or circle) at its live transform. */
+function drawBody(ctx, camera, body, fill, T) {
   const pos = body.getPosition();
   const angle = body.getAngle();
 
@@ -81,45 +122,61 @@ function drawBody(ctx, camera, body, fill, stroke) {
     const shape = f.getShape();
     const type = shape.getType(); // 'polygon' | 'circle' | 'edge' | 'chain'
 
+    ctx.save();
+    ctx.shadowColor = T.shadow;
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+
     if (type === 'circle') {
-      // Circle: transform its local center by the body pose, then draw.
       const lc = shape.getCenter ? shape.getCenter() : shape.m_p;
       const world = bodyPointToWorld(pos, angle, lc.x, lc.y);
       const c = camera.worldToScreen(world.x, world.y);
-      const rpx = shape.getRadius() * CONFIG.PPM;
+      const rpx = shape.getRadius() * camera.ppm;
       ctx.beginPath();
       ctx.arc(c.x, c.y, rpx, 0, Math.PI * 2);
       ctx.fillStyle = fill;
       ctx.fill();
-      ctx.strokeStyle = stroke;
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = T.outline;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      // A little radius spoke so rotation is visible.
+      // Soft rotation spoke.
       const edge = bodyPointToWorld(pos, angle, lc.x + shape.getRadius(), lc.y);
       const e = camera.worldToScreen(edge.x, edge.y);
+      ctx.strokeStyle = 'rgba(18,22,45,0.22)';
       ctx.beginPath();
       ctx.moveTo(c.x, c.y);
       ctx.lineTo(e.x, e.y);
       ctx.stroke();
     } else if (type === 'polygon') {
-      // Polygon (our boxes): map each vertex through the body pose.
+      // Our segments are axis-aligned boxes: recover local extents, then draw
+      // a ROUNDED rect in the body's rotated frame for a soft look.
       const verts = shape.m_vertices || (shape.getVertex && collectVerts(shape));
-      ctx.beginPath();
-      for (let i = 0; i < verts.length; i++) {
-        const v = verts[i];
-        const world = bodyPointToWorld(pos, angle, v.x, v.y);
-        const p = camera.worldToScreen(world.x, world.y);
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
+      let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+      for (const v of verts) {
+        if (v.x < minx) minx = v.x;
+        if (v.x > maxx) maxx = v.x;
+        if (v.y < miny) miny = v.y;
+        if (v.y > maxy) maxy = v.y;
       }
-      ctx.closePath();
+      const w = (maxx - minx) * camera.ppm;
+      const h = (maxy - miny) * camera.ppm;
+      const lcx = (minx + maxx) / 2;
+      const lcy = (miny + maxy) / 2;
+      const world = bodyPointToWorld(pos, angle, lcx, lcy);
+      const c = camera.worldToScreen(world.x, world.y);
+      const rad = Math.min(w, h) * CONFIG.theme.bodyRadiusFrac;
+      ctx.translate(c.x, c.y);
+      ctx.rotate(-angle); // world CCW -> screen CW (y-down)
+      roundRectPath(ctx, -w / 2, -h / 2, w, h, rad);
       ctx.fillStyle = fill;
       ctx.fill();
-      ctx.strokeStyle = stroke;
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = T.outline;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    // 'edge'/'chain' fixtures (the ground) are drawn separately by drawGround.
+    ctx.restore();
   }
 }
 
@@ -141,4 +198,4 @@ function bodyPointToWorld(pos, angle, lx, ly) {
   };
 }
 
-export default drawScene;
+export default drawSim;

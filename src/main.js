@@ -1,93 +1,131 @@
 /*
- * main.js — ENTRY POINT. Wires everything together and starts the loop.
- * =====================================================================
- * Responsibilities:
- *   1. Grab the fullscreen <canvas id="sim"> and its 2D context.
- *   2. Size the canvas to the viewport, honoring devicePixelRatio, and
- *      re-size on window resize.
- *   3. Build a Sim from defaultBiped().
- *   4. Create a Camera and a fixed-timestep Loop.
- *   5. Each frame: run the controller (flail) + step the sim `speed` times
- *      (handled inside Loop), then follow the root with the camera and draw.
- *   6. Wire the sidebar Controls (reset/pause/flail/speed).
+ * main.js — ENTRY POINT. Wires the whole app together and starts the loop.
+ * =======================================================================
+ * The app has two MODES sharing one fullscreen (transparent) canvas over the
+ * page's animated gradient sky:
  *
- * planck is expected on window.planck (loaded by a plain <script> before
- * this module). We never import planck; the physics modules read the global.
+ *   TRAIN  — a grid of training lanes. Several different creatures each train
+ *            in their own viewport cell (LaneManager). Every frame we advance
+ *            each lane's Trainer `speed` times (via the fixed-timestep Loop)
+ *            and repaint the grid.
+ *
+ *   EDITOR — draw a creature (bodies + limited hinges) and spawn it into a new
+ *            lane (Editor).
+ *
+ * The Sidebar (frosted glass) wires all the controls, the lane/slot lists and
+ * the focused-lane stats + reward graph. Storage handles save/load and file
+ * export/import. planck is expected on window.planck (a plain <script> before
+ * this module); we never import planck — the physics modules read the global.
  */
 
 import { CONFIG } from './config.js';
 import { defaultBiped } from './creature.js';
-import { Sim } from './physics/sim.js';
-import { Camera } from './ui/camera.js';
 import { Loop } from './ui/loop.js';
-import { Controls } from './ui/controls.js';
-import { drawScene } from './render.js';
+import { Sidebar } from './ui/controls.js';
+import { Editor } from './ui/editor.js';
+import { LaneManager } from './app/lanes.js';
 
 // --- Canvas & context ---------------------------------------------------
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('sim'));
 const ctx = canvas.getContext('2d');
 
-const camera = new Camera();
+// Shared app state (mode is read every frame by the render dispatcher).
+const app = { mode: 'train' };
+
+// Current CSS-pixel viewport (kept in sync by resize()).
+let viewW = window.innerWidth;
+let viewH = window.innerHeight;
+
+const lanes = new LaneManager();
+const editor = new Editor({
+  onSpawn: (creature) => {
+    const lane = sidebar._addLane(creature, { name: creature.name });
+    if (lane) sidebar.setMode('train'); // jump to the grid to watch it train
+  },
+  onMessage: (msg, kind) => sidebar.setMsg(msg, kind),
+});
 
 /**
  * resize() — match the canvas backing store to viewport * devicePixelRatio,
- * keep the CSS size at 100vw/100vh, and reset the transform so all drawing
- * happens in CSS-pixel space (we pre-scale by DPR here).
+ * keep CSS size at 100vw/100vh, reset the transform so we draw in CSS pixels,
+ * and propagate the new size to the lane grid and the editor.
  */
 function resize() {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
-  canvas.style.width = w + 'px';
-  canvas.style.height = h + 'px';
-  // Draw in CSS pixels; the transform bakes in the DPR scale.
+  viewW = window.innerWidth;
+  viewH = window.innerHeight;
+  canvas.width = Math.round(viewW * dpr);
+  canvas.height = Math.round(viewH * dpr);
+  canvas.style.width = viewW + 'px';
+  canvas.style.height = viewH + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  camera.setViewport(w, h);
+  lanes.setViewport(viewW, viewH);
+  editor.setViewport(viewW, viewH);
 }
 window.addEventListener('resize', resize);
 resize();
 
-// --- Sim ---------------------------------------------------------------
-// `sim` is a mutable module-level ref because Reset rebuilds it. Everyone
-// who needs the current sim reads it through getSim().
-let sim = new Sim(defaultBiped());
-const getSim = () => sim;
-
-// Snap the camera onto the root at startup.
-camera.snap(sim.rootPosition().x);
-
-// --- Loop --------------------------------------------------------------
-// onStep advances physics once (Loop calls it `speed` times per frame).
-// We apply the flail controller just before each step.
+// --- Loop ---------------------------------------------------------------
+// onStep advances every lane's trainer ONE control step; the Loop calls it
+// `speed` times per frame (so speed == control-steps-per-frame per lane).
+// onRender clears the transparent canvas and paints the active mode.
 const loop = new Loop(
-  (dt) => {
-    controls.applyControl(sim);
-    sim.step(dt);
+  () => {
+    if (app.mode === 'train') lanes.tickAll();
   },
   () => {
-    camera.follow(sim.rootPosition().x);
-    drawScene(ctx, sim, camera);
-    controls.updateHud(sim);
+    ctx.clearRect(0, 0, viewW, viewH);
+    if (app.mode === 'editor') editor.draw(ctx);
+    else lanes.draw(ctx);
+    sidebar.updateHud();
   }
 );
 
-// --- Controls (needs loop + a reset action) ----------------------------
-const controls = new Controls({
-  getSim,
-  loop,
-  onReset: () => {
-    sim = new Sim(defaultBiped());
-    camera.snap(sim.rootPosition().x);
-    loop.simTime = 0;
-    controls.onSimRebuilt();
-  },
+// --- Sidebar (needs lanes, editor, loop, app) ---------------------------
+const sidebar = new Sidebar({ laneManager: lanes, editor, loop, app });
+
+// --- Pointer routing ----------------------------------------------------
+// In EDITOR mode the canvas drives the editor (draw/drag). In TRAIN mode a
+// click focuses the lane under the cursor.
+function cssXY(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+let downXY = null;
+canvas.addEventListener('pointerdown', (e) => {
+  const { x, y } = cssXY(e);
+  if (app.mode === 'editor') {
+    editor.onPointerDown(x, y);
+    canvas.setPointerCapture(e.pointerId);
+  } else {
+    downXY = { x, y };
+  }
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (app.mode !== 'editor') return;
+  const { x, y } = cssXY(e);
+  editor.onPointerMove(x, y);
+});
+canvas.addEventListener('pointerup', (e) => {
+  const { x, y } = cssXY(e);
+  if (app.mode === 'editor') {
+    editor.onPointerUp(x, y);
+  } else if (downXY) {
+    // Treat a near-stationary press/release as a click-to-focus.
+    if (Math.hypot(x - downXY.x, y - downXY.y) < 6) {
+      const id = lanes.hitTest(x, y);
+      if (id != null) {
+        lanes.focus(id);
+        sidebar.refresh();
+      }
+    }
+    downXY = null;
+  }
 });
 
-// --- Go ----------------------------------------------------------------
+// --- Seed one lane and go ----------------------------------------------
+sidebar._addLane(defaultBiped(), { name: 'Default Biped' });
 loop.start();
 
-// Expose a couple of handles for debugging in the console.
-// (Harmless; the whole thing is a static toy.)
-window.walkSim = { get sim() { return sim; }, loop, camera, CONFIG };
+// Debug handles (harmless; this is a static toy).
+window.walkSim = { lanes, editor, sidebar, loop, app, CONFIG };

@@ -3,22 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>walk-sim — AI learns to walk</title>
+  <title>walk-sim — teach creatures to walk</title>
   <style>
     /* ===================================================================
-     * Dark theme. The canvas owns the whole screen; the sidebar floats
-     * over it (translucent, backdrop-blurred). This is the ONLY UI.
+     * GLASS ON GRADIENT.
+     * A soft, slowly animated gradient "sky" fills the page. The canvas is
+     * transparent and floats over it; the sidebar/panels are frosted glass
+     * (translucent, backdrop-blurred, rounded, softly shadowed). Everything
+     * floats. The canvas renderer (render.js / editor.js) matches this look.
      * =================================================================== */
     :root {
-      --bg: #05070c;
-      --card-bg: rgba(16, 21, 30, 0.72);
-      --card-border: rgba(255, 255, 255, 0.10);
-      --text: #e6e9ee;
-      --muted: #9aa0a6;
-      --accent: #7cc4ff;
-      --btn-bg: rgba(255, 255, 255, 0.06);
-      --btn-bg-hover: rgba(255, 255, 255, 0.12);
-      --btn-active: rgba(124, 196, 255, 0.22);
+      --text: #f4f7ff;
+      --muted: rgba(244, 247, 255, 0.72);
+      --accent: #8fd3ff;
+      --glass: rgba(255, 255, 255, 0.10);
+      --glass-strong: rgba(255, 255, 255, 0.16);
+      --glass-border: rgba(255, 255, 255, 0.28);
+      --glass-shadow: 0 12px 40px rgba(20, 24, 60, 0.35);
+      --radius: 20px;
+      --radius-sm: 12px;
+      --ok: #9be7b4;
+      --err: #ff9fb6;
     }
 
     * { box-sizing: border-box; }
@@ -27,133 +32,319 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      overflow: hidden;              /* full-bleed canvas; nothing scrolls */
-      background: var(--bg);
+      overflow: hidden;
       color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
 
-    /* FULLSCREEN simulation canvas — sits behind the UI. */
+    /* The animated pastel/twilight sky. A big gradient we drift slowly. */
+    body {
+      background: linear-gradient(120deg, #8ec5fc 0%, #b7a8ff 22%, #f0a6d8 45%, #ffc6a0 66%, #a0e7ff 88%, #8ec5fc 100%);
+      background-size: 320% 320%;
+      animation: sky 34s ease-in-out infinite;
+    }
+    @keyframes sky {
+      0%   { background-position: 0% 50%; }
+      25%  { background-position: 55% 35%; }
+      50%  { background-position: 100% 60%; }
+      75%  { background-position: 45% 80%; }
+      100% { background-position: 0% 50%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body { animation: none; }
+    }
+
+    /* FULLSCREEN, TRANSPARENT simulation canvas — floats over the sky. */
     canvas#sim {
       position: fixed;
       inset: 0;
       width: 100vw;
       height: 100vh;
       display: block;
-      background: var(--bg);
+      background: transparent;
       z-index: 0;
+      touch-action: none;
     }
 
-    /* Floating sidebar: translucent dark card, top-left, blurred backdrop. */
+    /* Floating frosted sidebar. */
     #sidebar {
       position: fixed;
       top: 16px;
       left: 16px;
       z-index: 10;
-      width: 240px;
+      width: 264px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
       padding: 16px;
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(18px) saturate(1.2);
+      -webkit-backdrop-filter: blur(18px) saturate(1.2);
+      box-shadow: var(--glass-shadow);
       display: flex;
       flex-direction: column;
       gap: 12px;
       user-select: none;
     }
+    /* Slim glassy scrollbar. */
+    #sidebar::-webkit-scrollbar { width: 8px; }
+    #sidebar::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.25); border-radius: 8px;
+    }
 
     #sidebar h1 {
       margin: 0;
-      font-size: 15px;
-      font-weight: 600;
+      font-size: 16px;
+      font-weight: 700;
       letter-spacing: 0.2px;
+      text-shadow: 0 1px 8px rgba(20,24,60,0.35);
     }
     #sidebar h1 span { color: var(--accent); }
-
-    #sidebar .sub {
+    .sub {
       margin: -6px 0 2px;
       font-size: 11px;
       color: var(--muted);
-      line-height: 1.4;
+      line-height: 1.45;
     }
 
     .row { display: flex; gap: 8px; }
+    .section {
+      display: flex; flex-direction: column; gap: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.16);
+    }
+    .section-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.6px;
+      text-transform: uppercase; color: var(--muted);
+    }
 
+    /* Glassy controls. */
     button {
       flex: 1 1 0;
       appearance: none;
       cursor: pointer;
       color: var(--text);
-      background: var(--btn-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 9px;
+      background: var(--glass-strong);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
       padding: 9px 10px;
       font-size: 13px;
-      font-weight: 500;
-      transition: background 0.15s ease, border-color 0.15s ease;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(20,24,60,0.18);
+      transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
     }
-    button:hover { background: var(--btn-bg-hover); }
-    button.active { background: var(--btn-active); border-color: var(--accent); }
+    button:hover { background: rgba(255,255,255,0.24); transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button.active { background: rgba(143,196,255,0.35); border-color: var(--accent); }
 
-    .toggle {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 13px;
-      color: var(--text);
+    .icon-btn {
+      flex: 0 0 auto; width: 30px; padding: 6px 0; font-size: 13px; line-height: 1;
     }
-    .toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+    label.toggle, .lane-exploit {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; font-size: 13px; color: var(--text);
+    }
+    input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
     .field { display: flex; flex-direction: column; gap: 6px; }
     .field .label-row {
-      display: flex; justify-content: space-between; align-items: baseline;
-      font-size: 13px;
+      display: flex; justify-content: space-between; align-items: baseline; font-size: 13px;
     }
     .field .label-row .val { color: var(--accent); font-variant-numeric: tabular-nums; }
     input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      color: var(--text);
+      background: rgba(255,255,255,0.10);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      padding: 7px 9px;
+      font-size: 13px;
+    }
+    input::placeholder { color: rgba(244,247,255,0.5); }
+
+    /* Segmented tool picker (radios styled as glass buttons). */
+    .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
+    .segmented label {
+      flex: 1 1 0; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600;
+      padding: 8px 6px; border-radius: 10px;
+      background: var(--glass-strong); border: 1px solid var(--glass-border);
+    }
+    .segmented input { display: none; }
+    .segmented input:checked + span { color: #0b1024; }
+    .segmented label:has(input:checked) {
+      background: rgba(143,196,255,0.55); border-color: var(--accent);
+    }
+
+    /* Stat card (frosted). */
+    .card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 14px;
+      padding: 10px 12px;
+    }
     #hud {
-      margin-top: 2px;
-      padding-top: 10px;
-      border-top: 1px solid var(--card-border);
-      font-size: 11px;
-      color: var(--muted);
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
+      font-size: 11.5px; color: var(--text);
+      font-variant-numeric: tabular-nums; white-space: pre-line; line-height: 1.5;
+    }
+    #reward-graph {
+      width: 100%; height: 66px; display: block;
+      border-radius: 12px; margin-top: 8px;
+      border: 1px solid rgba(255,255,255,0.14);
+    }
+
+    /* Lane + slot lists. */
+    .lane-row, .slot-row {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 12px; padding: 6px;
+    }
+    .lane-row.focused { border-color: var(--accent); background: rgba(143,196,255,0.18); }
+    .lane-name, .slot-name {
+      flex: 1 1 auto; text-align: left; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; padding: 6px 8px; font-weight: 600; font-size: 12.5px;
+      box-shadow: none;
+    }
+    .lane-exploit { flex: 0 0 auto; gap: 4px; font-size: 11px; }
+    .lane-exploit input { width: 14px; height: 14px; }
+    .muted-line { font-size: 11.5px; color: var(--muted); padding: 4px 2px; }
+
+    #msg { font-size: 11.5px; color: var(--muted); min-height: 15px; line-height: 1.4; }
+    #msg[data-kind="ok"]  { color: var(--ok); }
+    #msg[data-kind="err"] { color: var(--err); }
+
+    .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .file-btn { position: relative; overflow: hidden; }
+    .file-btn input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0;
     }
   </style>
 </head>
 <body>
-  <!-- The simulation is painted here. -->
+  <!-- The simulation / editor is painted here (transparent over the sky). -->
   <canvas id="sim"></canvas>
 
-  <!-- The floating control sidebar (the only UI). ids are read by controls.js -->
+  <!-- The floating frosted sidebar. ids are read by controls.js / editor.js -->
   <aside id="sidebar">
     <h1>walk<span>-sim</span></h1>
-    <p class="sub">A biped ragdoll dropped into planck.js physics. No learning yet — just physics, render &amp; controls.</p>
+    <p class="sub">Draw a creature, hinge &amp; limit its joints, then watch many of them learn to walk — each falls, resets to start, and tries again.</p>
 
+    <!-- Mode switch -->
     <div class="row">
-      <button id="btn-reset" type="button">Reset</button>
-      <button id="btn-pause" type="button">Pause</button>
+      <button id="btn-mode-train" type="button" class="active">Train</button>
+      <button id="btn-mode-editor" type="button">Editor</button>
     </div>
 
-    <label class="toggle">
-      <span>Flail joints</span>
-      <input id="chk-flail" type="checkbox" />
-    </label>
-
-    <div class="field">
-      <div class="label-row">
-        <label for="slider-speed">Sim speed</label>
-        <span class="val" id="val-speed">1x</span>
+    <!-- ============================ TRAIN ============================ -->
+    <div id="panel-train">
+      <div class="section" style="border-top:none; padding-top:0;">
+        <div class="row">
+          <button id="btn-train-all" type="button">Pause all</button>
+          <button id="btn-add-lane" type="button">+ Add biped</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label for="slider-speed">Speed (steps/frame)</label>
+            <span class="val" id="val-speed">1×</span>
+          </div>
+          <input id="slider-speed" type="range" min="1" max="8" step="1" value="1" />
+        </div>
       </div>
-      <input id="slider-speed" type="range" min="1" max="8" step="1" value="1" />
+
+      <div class="section">
+        <div class="section-title">Lanes</div>
+        <div id="lane-list"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Focused lane</div>
+        <div class="card" id="hud">starting…</div>
+        <canvas id="reward-graph"></canvas>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Save / Load</div>
+        <input id="slot-name" type="text" placeholder="slot name…" />
+        <div class="row">
+          <button id="btn-save-creature" type="button">Save body</button>
+          <button id="btn-save-bundle" type="button">Save + brain</button>
+        </div>
+        <div id="slot-list"></div>
+        <div class="row">
+          <button id="btn-export" type="button">Export file</button>
+          <button type="button" class="file-btn">Import file
+            <input id="file-import" type="file" accept=".json,application/json" />
+          </button>
+        </div>
+      </div>
     </div>
 
-    <div id="hud">starting…</div>
+    <!-- ============================ EDITOR ============================ -->
+    <div id="panel-editor" style="display:none;">
+      <div class="section" style="border-top:none; padding-top:0;">
+        <input id="editor-name" type="text" placeholder="creature name…" value="Custom Creature" />
+        <div class="section-title">Tool</div>
+        <div class="segmented">
+          <label><input type="radio" name="editor-tool" id="editor-tool-select" value="select" checked /><span>Select</span></label>
+          <label><input type="radio" name="editor-tool" id="editor-tool-box" value="box" /><span>Box</span></label>
+          <label><input type="radio" name="editor-tool" id="editor-tool-circle" value="circle" /><span>Circle</span></label>
+          <label><input type="radio" name="editor-tool" id="editor-tool-joint" value="joint" /><span>Joint</span></label>
+        </div>
+        <label class="toggle">
+          <span>Snap to grid</span>
+          <input id="chk-snap" type="checkbox" />
+        </label>
+        <p class="hint">Drag on the canvas to draw a segment. In <b>Joint</b> mode click two segments to hinge them. Pick <b>Select</b> to move parts, drag the pivot, or drag the <b>L</b>/<b>U</b> handles to set the movement limits (the shaded arc shows the allowed swing).</p>
+      </div>
+
+      <!-- Selected body -->
+      <div class="section" id="editor-body-panel" style="display:none;">
+        <div class="section-title">Body — <span id="editor-body-title"></span></div>
+        <label class="toggle"><span>Root (torso)</span><input id="chk-body-root" type="checkbox" /></label>
+        <label class="toggle"><span>Foot (ground sensor)</span><input id="chk-body-foot" type="checkbox" /></label>
+        <button id="btn-body-delete" type="button">Delete body</button>
+      </div>
+
+      <!-- Selected joint -->
+      <div class="section" id="editor-joint-panel" style="display:none;">
+        <div class="section-title">Joint — <span id="editor-joint-title"></span></div>
+        <div class="row">
+          <div class="field">
+            <div class="label-row"><label for="editor-joint-lower">Lower °</label></div>
+            <input id="editor-joint-lower" type="number" step="5" value="-45" />
+          </div>
+          <div class="field">
+            <div class="label-row"><label for="editor-joint-upper">Upper °</label></div>
+            <input id="editor-joint-upper" type="number" step="5" value="45" />
+          </div>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label for="editor-joint-torque">Motor torque</label>
+            <span class="val" id="editor-joint-torque-val">80 N·m</span>
+          </div>
+          <input id="editor-joint-torque" type="range" min="0" max="300" step="5" value="80" />
+        </div>
+        <label class="toggle"><span>Motorized (driven by the brain)</span><input id="chk-joint-motor" type="checkbox" checked /></label>
+        <button id="btn-joint-delete" type="button">Delete joint</button>
+      </div>
+
+      <div class="section">
+        <div class="row">
+          <button id="btn-editor-spawn" type="button">Spawn / Train this</button>
+        </div>
+        <div class="row">
+          <button id="btn-editor-load" type="button">Load biped</button>
+          <button id="btn-editor-clear" type="button">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="msg"></div>
   </aside>
 
   <!-- planck.js (Box2D) as a PLAIN script: exposes window.planck. -->
