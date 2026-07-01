@@ -123,15 +123,26 @@ export function observe(sim, limits) {
  *
  * `action` is the SQUASHED policy output in [-1,1] (sim.motorized order). We
  * scale it to motor speeds, advance the physics by CONFIG.RL.frameSkip fixed
- * sub-steps (a "control step"), then score the transition:
+ * sub-steps (a "control step"), then score the transition.
  *
- *   reward = wProgress * ΔrootX          // forward progress this step
- *          + aliveBonus                  // survive => small constant reward
- *          - wEnergy   * mean(action^2)  // penalise thrashing the motors
- *          - wUpright  * rootAngle^2      // stay vertical
+ * REWARD — a standard locomotion reward that teaches BALANCE FIRST, then walk:
+ *
+ *   reward = aliveBonus                       // big base: just staying up pays
+ *          + wVel * min(avgVx, vTarget)·G     // forward velocity, CAPPED,
+ *                                             //   only when upright (gate G)
+ *          - wUpright * rootAngle^2           // keep the torso vertical
+ *          - wHeight  * (rootY - targetH)^2   // keep it standing tall (no crouch)
+ *          - wEnergy  * mean(action^2)        // don't thrash the motors
+ *          - wSmooth  * mean(Δaction^2)       // don't jitter frame-to-frame
+ *
+ * where avgVx = ΔrootX / controlDt (average forward speed this control step)
+ * and the gate G = 1 only while |rootAngle| < uprightThresh (else 0), so the
+ * agent cannot cheat by diving/faceplanting forward — progress only counts
+ * while it is actually balanced. aliveBonus is the dominant base term, so the
+ * gradient is "stand up" first and "walk" second. All knobs come from CONFIG.RL.
  *
  * done when the root falls below fallHeight, tilts past maxTilt, or the
- * episode reaches maxEpisodeSteps. All knobs come from CONFIG.RL.
+ * episode reaches maxEpisodeSteps.
  */
 export class Env {
   constructor(sim) {
@@ -140,6 +151,7 @@ export class Env {
     this.stepInEpisode = 0;
     this.startX = 0;
     this.prevX = 0;
+    this.prevAction = null; // last squashed action, for the smoothness penalty
   }
 
   /** Rebuild the sim to its rest pose and return the first observation. */
@@ -151,6 +163,7 @@ export class Env {
     const p = this.sim.rootPosition();
     this.startX = p.x;
     this.prevX = p.x;
+    this.prevAction = null;
     return observe(this.sim, this.limits);
   }
 
@@ -164,16 +177,24 @@ export class Env {
     // Squashed [-1,1] -> target motor speeds (rad/s), in sim.motorized order.
     const n = this.sim.motorized.length;
     const speeds = new Array(n);
+    const clamped = new Float64Array(n); // clamped action, kept for smoothness
     let energy = 0;
+    let smooth = 0;
     for (let i = 0; i < n; i++) {
       let a = action[i];
       if (!Number.isFinite(a)) a = 0;
       if (a > 1) a = 1;
       else if (a < -1) a = -1;
+      clamped[i] = a;
       speeds[i] = a * rl.maxMotorSpeed;
       energy += a * a;
+      const prev = this.prevAction ? this.prevAction[i] : a;
+      const da = a - prev;
+      smooth += da * da;
     }
     energy /= n || 1;
+    smooth /= n || 1;
+    this.prevAction = clamped;
     this.sim.setMotorSpeeds(speeds);
 
     // Advance frameSkip fixed physics steps under the held motor targets.
@@ -183,14 +204,24 @@ export class Env {
     // --- Reward ---
     const pos = this.sim.rootPosition();
     const ang = this.sim.rootAngle();
-    const dx = pos.x - this.prevX; // forward progress this control step
+    const controlDt = rl.frameSkip * CONFIG.dt;
+    const avgVx = (pos.x - this.prevX) / controlDt; // avg forward speed this step
     this.prevX = pos.x;
 
+    // Forward reward: capped at vTarget and gated on being upright, so the
+    // agent can't rack up progress by diving forward and faceplanting.
+    const upright = Math.abs(ang) < rl.uprightThresh;
+    const cappedVx = avgVx < rl.vTarget ? avgVx : rl.vTarget;
+    const fwd = upright && cappedVx > 0 ? cappedVx : 0;
+    const heightErr = pos.y - rl.targetHeight;
+
     const reward =
-      rl.wProgress * dx +
-      rl.aliveBonus -
+      rl.aliveBonus +
+      rl.wVel * fwd -
+      rl.wUpright * ang * ang -
+      rl.wHeight * heightErr * heightErr -
       rl.wEnergy * energy -
-      rl.wUpright * ang * ang;
+      rl.wSmooth * smooth;
 
     // --- Termination ---
     const fell = pos.y < rl.fallHeight;

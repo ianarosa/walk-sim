@@ -55,28 +55,33 @@
  * realistically the moment the sim starts — exactly what we want to see.
  */
 export function defaultBiped() {
-  // Shared dims (meters).
-  const torsoW = 0.45;
-  const torsoH = 0.9;
-  const torsoCY = 1.35; // torso center height
+  // Shared dims (meters). Tuned for LEARNABILITY: a lower centre of mass,
+  // wide/heavy feet for a stable base, and a rest pose whose feet sit exactly
+  // ON the ground (the old pose put the feet at y=-0.15, penetrating the floor,
+  // so the sim ejected the biped violently on the very first step).
+  const torsoW = 0.4;
+  const torsoH = 0.7;
 
-  const thighW = 0.16;
-  const thighH = 0.5;
-  const shinW = 0.14;
-  const shinH = 0.5;
-  const footW = 0.32;
-  const footH = 0.1;
+  const thighW = 0.18;
+  const thighH = 0.42;
+  const shinW = 0.16;
+  const shinH = 0.42;
+  const footW = 0.5; // wide foot => stable base of support
+  const footH = 0.12;
 
   // Hip x-offset from centerline for each leg.
-  const hipDX = 0.14;
+  const hipDX = 0.13;
 
-  // Precompute vertical anchor levels.
-  const hipY = torsoCY - torsoH / 2; // bottom of torso == hip pivot line
-  const thighCY = hipY - thighH / 2;
-  const kneeY = hipY - thighH;
-  const shinCY = kneeY - shinH / 2;
-  const ankleY = kneeY - shinH;
-  const footCY = ankleY - footH / 2;
+  // Precompute vertical anchor levels BOTTOM-UP so the feet rest on the ground
+  // (y=0) at rest. Legs are straight (angle 0); the torso center lands wherever
+  // the stacked segment heights put it (~1.31m).
+  const footCY = footH / 2; // foot bottom on the ground
+  const ankleY = footCY + footH / 2; // ankle at the top of the foot
+  const shinCY = ankleY + shinH / 2;
+  const kneeY = ankleY + shinH;
+  const thighCY = kneeY + thighH / 2;
+  const hipY = kneeY + thighH; // bottom of torso == hip pivot line
+  const torsoCY = hipY + torsoH / 2; // torso center height (~1.31m)
 
   // Build one leg (side = -1 for left, +1 for right).
   const leg = (side) => {
@@ -106,12 +111,13 @@ export function defaultBiped() {
       {
         id: `${tag}_foot`,
         shape: 'box',
-        // Foot sticks forward (+x) a touch from the ankle line.
-        x: x + 0.08,
+        // Foot sticks forward (+x) from the ankle so heel is behind, toe ahead.
+        x: x + 0.12,
         y: footCY,
         w: footW,
         h: footH,
-        density: 1.2,
+        // Heavy feet keep the centre of mass low and the base planted.
+        density: 2.5,
         friction: 0.95,
         isFoot: true,
       },
@@ -124,7 +130,7 @@ export function defaultBiped() {
         anchor: { x, y: hipY },
         lowerAngle: -1.2, // ~ -69deg
         upperAngle: 1.0, //  ~  57deg
-        maxMotorTorque: 90,
+        maxMotorTorque: 100,
         motorized: true,
       },
       {
@@ -135,7 +141,7 @@ export function defaultBiped() {
         // Knee only bends one way (backwards), like a real leg.
         lowerAngle: -2.2,
         upperAngle: 0.0,
-        maxMotorTorque: 70,
+        maxMotorTorque: 80,
         motorized: true,
       },
       {
@@ -145,7 +151,7 @@ export function defaultBiped() {
         anchor: { x, y: ankleY },
         lowerAngle: -0.6,
         upperAngle: 0.6,
-        maxMotorTorque: 40,
+        maxMotorTorque: 45,
         motorized: true,
       },
     ];

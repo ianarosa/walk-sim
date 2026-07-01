@@ -190,14 +190,19 @@ export const CONFIG = Object.freeze({
     // Episode / control
     maxEpisodeSteps: 1000, // control steps before a timeout reset
     frameSkip: 4, // fixed physics steps per control step
-    maxMotorSpeed: 8, // rad/s a |action|=1 commands to a motor
+    maxMotorSpeed: 5, // rad/s a |action|=1 commands to a motor (was 8: too violent)
     fallHeight: 0.6, // root y below this => the creature has fallen
     maxTilt: 1.0, // |rootAngle| above this (rad) => toppled
-    // Reward shaping
-    wProgress: 60, // weight on forward progress (Δ rootX per control step)
-    aliveBonus: 0.1, // per-step reward for staying up
-    wEnergy: 0.02, // penalty weight on mean(action^2)
+    // Reward shaping — balance-first locomotion (see rl/env.js for the formula).
+    aliveBonus: 1.0, // per-step reward for staying up (dominant BASE term)
+    wVel: 1.0, // weight on capped forward velocity min(avgVx, vTarget)
+    vTarget: 1.4, // m/s cap on the forward-velocity reward (don't over-sprint)
+    uprightThresh: 0.5, // rad; forward reward only counts while |rootAngle| < this
+    targetHeight: 1.25, // desired torso height (m); penalize deviation (no crouch cheat)
+    wHeight: 3.0, // penalty weight on (rootY - targetHeight)^2
     wUpright: 0.3, // penalty weight on rootAngle^2
+    wEnergy: 0.05, // penalty weight on mean(action^2)
+    wSmooth: 0.05, // penalty weight on mean(Δaction^2) — reduces jitter/flailing
     // Observation
     speedScale: 0.1, // scales joint speeds (rad/s) into the obs vector
     // UI
