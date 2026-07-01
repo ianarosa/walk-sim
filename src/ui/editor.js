@@ -48,6 +48,11 @@ function norm(a) {
 const DEG = 180 / Math.PI;
 const RAD = Math.PI / 180;
 
+// Default sizes for CLICK-TO-PLACE creation (meters). Kept local to the editor
+// so no CONFIG keys are added; the body panel lets the user resize afterwards.
+const DEFAULT_BOX = { w: 0.4, h: 0.4 };
+const DEFAULT_CIRCLE_R = 0.2;
+
 export class Editor {
   /**
    * @param {object} deps
@@ -162,7 +167,11 @@ export class Editor {
     const m = this.s2m(sx, sy);
 
     if (this.tool === 'box' || this.tool === 'circle') {
-      this.drag = { mode: 'create', shape: this.tool, start: m, cur: m };
+      // CLICK-TO-PLACE: a single click drops a default-sized segment at the
+      // click point; there is no drag-to-size. The user resizes afterwards via
+      // the body panel's width/height/radius inputs.
+      this._placeBody(this.tool, m);
+      this.updatePanel();
       return;
     }
 
@@ -225,10 +234,6 @@ export class Editor {
     if (!this.drag) return;
     const m = this.s2m(sx, sy);
 
-    if (this.drag.mode === 'create') {
-      this.drag.cur = m;
-      return;
-    }
     if (this.drag.mode === 'move') {
       const b = this.bodyById(this.drag.bodyId);
       if (b) {
@@ -259,48 +264,47 @@ export class Editor {
   }
 
   onPointerUp() {
-    if (this.drag && this.drag.mode === 'create') this._finishCreate(this.drag);
     this.drag = null;
     this.updatePanel();
   }
 
   // ---- Model mutations ---------------------------------------------------
 
-  _finishCreate(d) {
-    const min = CONFIG.editor.minSize;
+  /** _placeBody(shape, m) — CLICK-TO-PLACE a default-sized segment centered at
+   *  world point `m`. The user resizes afterwards via the body panel's
+   *  width/height/radius inputs. Defaults live here (no config keys added). */
+  _placeBody(shape, m) {
+    const x = this._snap(m.x);
+    const y = this._snap(m.y);
     let body;
-    if (d.shape === 'box') {
-      const w = this._snap(Math.abs(d.cur.x - d.start.x));
-      const h = this._snap(Math.abs(d.cur.y - d.start.y));
-      if (w < min || h < min) return; // ignore a stray click / speck
+    if (shape === 'box') {
       body = {
         id: `b${++this._bodyN}`,
         shape: 'box',
-        x: this._snap((d.start.x + d.cur.x) / 2),
-        y: this._snap((d.start.y + d.cur.y) / 2),
-        w,
-        h,
+        x,
+        y,
+        w: DEFAULT_BOX.w, // 0.4m
+        h: DEFAULT_BOX.h, // 0.4m
         angle: 0,
         density: 1,
         friction: 0.6,
       };
     } else {
-      const r = this._snap(Math.hypot(d.cur.x - d.start.x, d.cur.y - d.start.y));
-      if (r < min) return;
       body = {
         id: `b${++this._bodyN}`,
         shape: 'circle',
-        x: this._snap(d.start.x),
-        y: this._snap(d.start.y),
-        r,
+        x,
+        y,
+        r: DEFAULT_CIRCLE_R, // 0.2m
         angle: 0,
         density: 1,
         friction: 0.6,
       };
     }
-    // First body drawn becomes the ROOT (torso) automatically.
+    // First body placed becomes the ROOT (torso) automatically.
     if (!this.bodies.some((b) => b.isRoot)) body.isRoot = true;
     this.bodies.push(body);
+    // Select it so the body panel opens for immediate tweaking.
     this.selection = { type: 'body', id: body.id };
   }
 
@@ -454,6 +458,30 @@ export class Editor {
     this._chkRoot = document.getElementById('chk-body-root');
     this._chkFoot = document.getElementById('chk-body-foot');
     this._btnBodyDel = document.getElementById('btn-body-delete');
+
+    // Size controls (resize a placed segment). Box uses w/h, circle uses r;
+    // updatePanel() shows exactly one of these two rows for the selection.
+    this._sizeBoxRow = document.getElementById('editor-body-size-box');
+    this._sizeCircleRow = document.getElementById('editor-body-size-circle');
+    this._inBodyW = document.getElementById('editor-body-w');
+    this._inBodyH = document.getElementById('editor-body-h');
+    this._inBodyR = document.getElementById('editor-body-r');
+    const clampSize = (v) => Math.max(CONFIG.editor.minSize, Number(v) || 0);
+    if (this._inBodyW)
+      this._inBodyW.addEventListener('input', () => {
+        const b = this.selectedBody();
+        if (b && b.shape === 'box') b.w = clampSize(this._inBodyW.value);
+      });
+    if (this._inBodyH)
+      this._inBodyH.addEventListener('input', () => {
+        const b = this.selectedBody();
+        if (b && b.shape === 'box') b.h = clampSize(this._inBodyH.value);
+      });
+    if (this._inBodyR)
+      this._inBodyR.addEventListener('input', () => {
+        const b = this.selectedBody();
+        if (b && b.shape === 'circle') b.r = clampSize(this._inBodyR.value);
+      });
     if (this._chkRoot)
       this._chkRoot.addEventListener('change', () => {
         const b = this.selectedBody();
@@ -564,6 +592,17 @@ export class Editor {
         this._bodyTitle.textContent = `${b.id} (${b.shape})`;
       if (this._chkRoot) this._chkRoot.checked = !!b.isRoot;
       if (this._chkFoot) this._chkFoot.checked = !!b.isFoot;
+      // Show the size row matching the shape and mirror current dimensions.
+      const isBox = b.shape === 'box';
+      if (this._sizeBoxRow) this._sizeBoxRow.style.display = isBox ? '' : 'none';
+      if (this._sizeCircleRow)
+        this._sizeCircleRow.style.display = isBox ? 'none' : '';
+      if (isBox) {
+        if (this._inBodyW) this._inBodyW.value = String(b.w);
+        if (this._inBodyH) this._inBodyH.value = String(b.h);
+      } else if (this._inBodyR) {
+        this._inBodyR.value = String(b.r);
+      }
     }
     if (j) {
       if (this._jointTitle)
@@ -592,9 +631,6 @@ export class Editor {
 
     // Joints: every joint shows its limit arc so all limits are always visible.
     for (const j of this.joints) this._drawJoint(ctx, j, j.id === (this.selection && this.selection.id));
-
-    // Live creation preview.
-    if (this.drag && this.drag.mode === 'create') this._drawPreview(ctx, this.drag);
 
     // Pending-joint hint: ring the first-picked body.
     if (this.pendingA) {
@@ -698,31 +734,6 @@ export class Editor {
     ctx.arcTo(x, y + h, x, y, rr);
     ctx.arcTo(x, y, x + w, y, rr);
     ctx.closePath();
-  }
-
-  _drawPreview(ctx, d) {
-    ctx.save();
-    ctx.strokeStyle = '#7cc4ff';
-    ctx.setLineDash([6, 4]);
-    ctx.lineWidth = 1.5;
-    if (d.shape === 'box') {
-      const a = this.m2s(d.start.x, d.start.y);
-      const b = this.m2s(d.cur.x, d.cur.y);
-      ctx.strokeRect(
-        Math.min(a.x, b.x),
-        Math.min(a.y, b.y),
-        Math.abs(b.x - a.x),
-        Math.abs(b.y - a.y)
-      );
-    } else {
-      const c = this.m2s(d.start.x, d.start.y);
-      const rpx = Math.hypot(d.cur.x - d.start.x, d.cur.y - d.start.y) * this.ppm;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, rpx, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.restore();
   }
 
   /** Draw a joint's pivot + its allowed angular range as a filled arc, with

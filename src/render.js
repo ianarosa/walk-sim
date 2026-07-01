@@ -21,6 +21,7 @@
  */
 
 import { CONFIG } from './config.js';
+import { drawParallax, drawDistanceMarkers } from './scenery.js';
 
 /** Path a rounded rectangle (uses native roundRect when present). */
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -58,7 +59,17 @@ export function drawSim(ctx, sim, camera) {
   ctx.fillStyle = T.cellPanel;
   ctx.fillRect(ox, oy, camera.viewW, camera.viewH);
 
+  // --- Parallax backdrop (behind the ground + creature) ---
+  // Far hills -> clouds -> mid trees -> near bushes, each drifting at its own
+  // rate so the creature visibly travels past a stable, deterministic field.
+  drawParallax(ctx, camera);
+
   drawGround(ctx, camera, T);
+
+  // --- Ground distance markers (on top of the ground band, behind bodies) ---
+  // Fixed-world "Nm" ticks + a START line that scroll past as the camera chases
+  // the root, giving a concrete read on how far the walker has gone.
+  drawDistanceMarkers(ctx, camera);
 
   // --- Bodies (soft, rounded, gently shadowed) ---
   for (const [, body] of sim.bodies) {
