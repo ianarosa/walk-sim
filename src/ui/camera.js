@@ -25,6 +25,11 @@
 
 import { CONFIG } from '../config.js';
 
+// The tracked point may never sit more than this fraction of the half-view
+// away from the cell center — guarantees the creature stays on-screen no
+// matter how fast it moves or how high the sim-speed multiplier is.
+const MAX_LAG_FRAC = 0.35;
+
 export class Camera {
   constructor() {
     this.focusX = 0; // world x the camera is centered on (meters)
@@ -56,7 +61,14 @@ export class Camera {
 
   /** smoothly chase a target world x (typically the root's x). */
   follow(targetX) {
+    // Smooth chase for feel...
     this.focusX += (targetX - this.focusX) * CONFIG.camera.lerp;
+    // ...but hard-clamp so the target can't outrun the view (speed-independent).
+    const halfViewMeters = (this.viewW * 0.5) / this.ppm;
+    const maxLag = halfViewMeters * MAX_LAG_FRAC;
+    const gap = targetX - this.focusX;
+    if (gap > maxLag) this.focusX = targetX - maxLag;
+    else if (gap < -maxLag) this.focusX = targetX + maxLag;
   }
 
   /** snap instantly (used on reset/spawn so the camera doesn't glide across). */
