@@ -83,6 +83,13 @@ export class Editor {
     this.viewH = 1;
     this.ppm = CONFIG.editor.ppm;
 
+    // Fingers are less precise than a mouse: widen handle/anchor hit targets
+    // when the primary pointer is coarse (touch).
+    this._coarse =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(pointer: coarse)').matches;
+
     this._wireDom();
     this.updatePanel();
   }
@@ -197,7 +204,7 @@ export class Editor {
     // 1) If a joint is selected, prefer its handles/anchor (small targets).
     const j = this.selectedJoint();
     if (j) {
-      const pad = CONFIG.editor.hitPad;
+      const pad = this._coarse ? 18 : CONFIG.editor.hitPad;
       const lo = this.m2s(...Object.values(this._armPoint(j, j.lowerAngle)));
       const hi = this.m2s(...Object.values(this._armPoint(j, j.upperAngle)));
       const an = this.m2s(j.anchor.x, j.anchor.y);

@@ -40,7 +40,10 @@ const lanes = new LaneManager();
 const editor = new Editor({
   onSpawn: (creature) => {
     const lane = sidebar._addLane(creature, { name: creature.name });
-    if (lane) sidebar.setMode('train'); // jump to the grid to watch it train
+    if (lane) {
+      sidebar.setMode('train'); // jump to the grid to watch it train
+      sidebar.closeDrawer(); // on mobile, reveal the canvas
+    }
   },
   onMessage: (msg, kind) => sidebar.setMsg(msg, kind),
 });
@@ -63,6 +66,11 @@ function resize() {
   editor.setViewport(viewW, viewH);
 }
 window.addEventListener('resize', resize);
+// Phones fire orientationchange (and shift the visual viewport as the URL bar
+// shows/hides) without always firing a timely 'resize' — recompute size + DPR
+// on those too so the canvas stays crisp and correctly sized.
+window.addEventListener('orientationchange', resize);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
 
 // --- Loop ---------------------------------------------------------------
@@ -91,36 +99,61 @@ function cssXY(e) {
   const r = canvas.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
+// Non-passive so preventDefault() actually suppresses touch scrolling/zoom on
+// the canvas (belt-and-suspenders with canvas { touch-action: none }). A finger
+// wobbles more than a mouse, so the tap-vs-drag threshold is generous.
+const TAP_SLOP = 12; // px of movement still counted as a tap-to-focus
 let downXY = null;
-canvas.addEventListener('pointerdown', (e) => {
-  const { x, y } = cssXY(e);
-  if (app.mode === 'editor') {
-    editor.onPointerDown(x, y);
-    canvas.setPointerCapture(e.pointerId);
-  } else {
-    downXY = { x, y };
-  }
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (app.mode !== 'editor') return;
-  const { x, y } = cssXY(e);
-  editor.onPointerMove(x, y);
-});
-canvas.addEventListener('pointerup', (e) => {
-  const { x, y } = cssXY(e);
-  if (app.mode === 'editor') {
-    editor.onPointerUp(x, y);
-  } else if (downXY) {
-    // Treat a near-stationary press/release as a click-to-focus.
-    if (Math.hypot(x - downXY.x, y - downXY.y) < 6) {
-      const id = lanes.hitTest(x, y);
-      if (id != null) {
-        lanes.focus(id);
-        sidebar.refresh();
-      }
+canvas.addEventListener(
+  'pointerdown',
+  (e) => {
+    e.preventDefault();
+    const { x, y } = cssXY(e);
+    if (app.mode === 'editor') {
+      editor.onPointerDown(x, y);
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    } else {
+      downXY = { x, y };
     }
-    downXY = null;
-  }
+  },
+  { passive: false }
+);
+canvas.addEventListener(
+  'pointermove',
+  (e) => {
+    if (app.mode !== 'editor') return;
+    e.preventDefault();
+    const { x, y } = cssXY(e);
+    editor.onPointerMove(x, y);
+  },
+  { passive: false }
+);
+canvas.addEventListener(
+  'pointerup',
+  (e) => {
+    e.preventDefault();
+    const { x, y } = cssXY(e);
+    if (app.mode === 'editor') {
+      editor.onPointerUp(x, y);
+    } else if (downXY) {
+      // Treat a near-stationary press/release as a click-to-focus (tap-safe).
+      if (Math.hypot(x - downXY.x, y - downXY.y) < TAP_SLOP) {
+        const id = lanes.hitTest(x, y);
+        if (id != null) {
+          lanes.focus(id);
+          sidebar.refresh();
+        }
+      }
+      downXY = null;
+    }
+  },
+  { passive: false }
+);
+// If a touch/pointer is cancelled mid-gesture (e.g. system gesture), end any
+// active editor drag cleanly instead of leaving a body "stuck" to the finger.
+canvas.addEventListener('pointercancel', () => {
+  if (app.mode === 'editor') editor.onPointerUp();
+  downXY = null;
 });
 
 // --- Seed one lane and go ----------------------------------------------

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>walk-sim — teach creatures to walk</title>
   <style>
     /* ===================================================================
@@ -33,6 +33,9 @@
       padding: 0;
       height: 100%;
       overflow: hidden;
+      /* Kill pull-to-refresh / rubber-band bounce on touch devices. */
+      overscroll-behavior: none;
+      touch-action: manipulation;
       color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
@@ -66,15 +69,18 @@
       touch-action: none;
     }
 
-    /* Floating frosted sidebar. */
+    /* Floating frosted sidebar. On desktop this is the classic top-left card;
+     * env(safe-area-*) resolves to 0 on desktop so positions are unchanged. */
     #sidebar {
       position: fixed;
-      top: 16px;
-      left: 16px;
+      top: calc(16px + env(safe-area-inset-top));
+      left: calc(16px + env(safe-area-inset-left));
       z-index: 10;
       width: 264px;
       max-height: calc(100vh - 32px);
       overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       padding: 16px;
       background: var(--glass);
       border: 1px solid var(--glass-border);
@@ -87,6 +93,10 @@
       gap: 12px;
       user-select: none;
     }
+
+    /* Mobile-only chrome: hidden on desktop, revealed by the media query. */
+    #btn-menu { display: none; }
+    #drawer-scrim { display: none; }
     /* Slim glassy scrollbar. */
     #sidebar::-webkit-scrollbar { width: 8px; }
     #sidebar::-webkit-scrollbar-thumb {
@@ -222,11 +232,88 @@
     .file-btn input[type="file"] {
       position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0;
     }
+
+    /* ===================================================================
+     * MOBILE / TOUCH. Narrow screens OR a coarse (finger) pointer turn the
+     * floating sidebar into a slide-up bottom sheet with a tappable ☰ button,
+     * so the canvas can be full-screen. Desktop is untouched (this whole block
+     * only applies below the breakpoint / on coarse pointers).
+     * =================================================================== */
+    @media (max-width: 768px), (pointer: coarse) {
+      /* Floating toggle button (opens/closes the sheet). */
+      #btn-menu {
+        display: flex; align-items: center; justify-content: center;
+        position: fixed;
+        top: calc(12px + env(safe-area-inset-top));
+        left: calc(12px + env(safe-area-inset-left));
+        z-index: 30;
+        width: 48px; height: 48px; padding: 0;
+        font-size: 20px; line-height: 1; border-radius: 14px;
+        background: var(--glass); border: 1px solid var(--glass-border);
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--glass-shadow);
+      }
+      #btn-menu.active { background: rgba(143,196,255,0.35); border-color: var(--accent); }
+
+      /* Dimming scrim behind the open sheet; tap it to close. */
+      #drawer-scrim {
+        display: block; position: fixed; inset: 0; z-index: 15;
+        background: rgba(8,10,30,0.38);
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.25s ease;
+      }
+      #drawer-scrim.open { opacity: 1; pointer-events: auto; }
+
+      /* Sidebar becomes a bottom sheet that slides up when .open. */
+      #sidebar {
+        top: auto; left: 0; right: 0; bottom: 0;
+        width: auto; max-width: 640px; margin: 0 auto;
+        max-height: 84vh;
+        border-radius: 22px 22px 0 0;
+        padding: 10px 16px calc(18px + env(safe-area-inset-bottom));
+        padding-left: calc(16px + env(safe-area-inset-left));
+        padding-right: calc(16px + env(safe-area-inset-right));
+        z-index: 20;
+        gap: 14px;
+        transform: translateY(106%);
+        transition: transform 0.30s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      #sidebar.open { transform: translateY(0); }
+      /* Grab-handle affordance at the top of the sheet. */
+      #sidebar::before {
+        content: ""; flex: 0 0 auto;
+        width: 44px; height: 5px; margin: 0 auto 2px;
+        border-radius: 3px; background: rgba(255,255,255,0.4);
+      }
+
+      /* Finger-sized tap targets (~44px) and comfortable spacing. */
+      button { min-height: 44px; padding: 11px 12px; font-size: 14px; }
+      .icon-btn { width: 44px; height: 44px; font-size: 17px; }
+      .segmented { gap: 8px; }
+      .segmented label { padding: 12px 6px; font-size: 13px; }
+      input[type="text"], input[type="number"] {
+        min-height: 44px; font-size: 16px; padding: 11px 12px; /* 16px avoids iOS focus-zoom */
+      }
+      input[type="range"] { height: 34px; }
+      input[type="checkbox"] { width: 22px; height: 22px; }
+      .lane-exploit input { width: 20px; height: 20px; }
+      .lane-row, .slot-row { padding: 8px; gap: 8px; }
+      .lane-name, .slot-name { font-size: 14px; padding: 11px 8px; }
+      .section { gap: 12px; }
+      #reward-graph { height: 76px; }
+      .sub { font-size: 12px; }
+    }
   </style>
 </head>
 <body>
   <!-- The simulation / editor is painted here (transparent over the sky). -->
   <canvas id="sim"></canvas>
+
+  <!-- Mobile-only: floating toggle + scrim for the slide-up control sheet.
+       Hidden on desktop via CSS; wired by controls.js. -->
+  <button id="btn-menu" type="button" aria-label="Toggle controls">☰</button>
+  <div id="drawer-scrim"></div>
 
   <!-- The floating frosted sidebar. ids are read by controls.js / editor.js -->
   <aside id="sidebar">

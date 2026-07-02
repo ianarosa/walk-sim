@@ -64,6 +64,10 @@ export class Sidebar {
 
     this.msg = document.getElementById('msg');
 
+    // Mobile slide-up drawer: the ☰ button + scrim (hidden on desktop via CSS).
+    this.btnMenu = document.getElementById('btn-menu');
+    this.scrim = document.getElementById('drawer-scrim');
+
     this._initGraphCanvas();
     this._wire();
     this.setMode('train');
@@ -76,6 +80,31 @@ export class Sidebar {
     if (!this.msg) return;
     this.msg.textContent = text || '';
     this.msg.dataset.kind = kind || '';
+  }
+
+  // ---- Mobile drawer -----------------------------------------------------
+  // The sidebar element is styled as a bottom sheet under the CSS breakpoint;
+  // toggling the `open` class slides it in/out. On desktop the class is inert
+  // (the sheet transform only exists inside the media query), so this is safe
+  // to call anywhere. `sidebar` here is the <aside> element itself.
+
+  openDrawer() {
+    this._sidebarEl().classList.add('open');
+    if (this.scrim) this.scrim.classList.add('open');
+    if (this.btnMenu) this.btnMenu.classList.add('active');
+  }
+  closeDrawer() {
+    this._sidebarEl().classList.remove('open');
+    if (this.scrim) this.scrim.classList.remove('open');
+    if (this.btnMenu) this.btnMenu.classList.remove('active');
+  }
+  toggleDrawer() {
+    if (this._sidebarEl().classList.contains('open')) this.closeDrawer();
+    else this.openDrawer();
+  }
+  _sidebarEl() {
+    if (!this._aside) this._aside = document.getElementById('sidebar');
+    return this._aside;
   }
 
   // ---- Mode --------------------------------------------------------------
@@ -92,6 +121,12 @@ export class Sidebar {
   // ---- Wiring ------------------------------------------------------------
 
   _wire() {
+    // Mobile drawer toggle + tap-scrim-to-close.
+    if (this.btnMenu)
+      this.btnMenu.addEventListener('click', () => this.toggleDrawer());
+    if (this.scrim)
+      this.scrim.addEventListener('click', () => this.closeDrawer());
+
     if (this.btnModeTrain)
       this.btnModeTrain.addEventListener('click', () => this.setMode('train'));
     if (this.btnModeEditor)
