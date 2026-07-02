@@ -5,8 +5,15 @@
  * the speed (control-steps-per-frame), and the live list of lanes (focus /
  * exploit / reset / remove).
  *
- * IDs owned: btn-train-all, btn-add-lane, slider-speed, val-speed, lane-list.
+ * IDs owned: btn-train-all, btn-add-lane, slider-speed, val-speed,
+ *            slider-instances, val-instances, val-sps, lane-list.
  * Calls into: ctx.loop, ctx.lanes, ctx.addLane, ctx.setMsg, ctx.refresh.
+ *
+ * Phase 2: training runs in a background Worker PER LANE (see app/worker-lane.js),
+ * so the render loop no longer scales training with "speed". The speed slider is
+ * repurposed to the PREVIEW playback rate (control-steps per frame for the live
+ * preview only); a new instances slider sets how many parallel envs each worker
+ * trains; and a steps/sec readout shows the focused lane's training throughput.
  */
 
 import { registerPanel } from '../registry.js';
@@ -28,11 +35,19 @@ registerPanel({
         </div>
         <div class="field">
           <div class="label-row">
-            <label for="slider-speed">Speed (steps/frame)</label>
+            <label for="slider-instances">Instances (parallel envs)</label>
+            <span class="val" id="val-instances">8</span>
+          </div>
+          <input id="slider-instances" type="range" min="1" max="16" step="1" value="8" />
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label for="slider-speed">Preview speed (×)</label>
             <span class="val" id="val-speed">1×</span>
           </div>
           <input id="slider-speed" type="range" min="1" max="8" step="1" value="1" />
         </div>
+        <div class="muted-line" id="val-sps">training: warming up…</div>
       </div>
 
       <div class="section">
@@ -46,6 +61,9 @@ registerPanel({
     const btnAddLane = document.getElementById('btn-add-lane');
     const slider = document.getElementById('slider-speed');
     const valSpeed = document.getElementById('val-speed');
+    const sliderInstances = document.getElementById('slider-instances');
+    const valInstances = document.getElementById('val-instances');
+    const valSps = document.getElementById('val-sps');
     const laneList = document.getElementById('lane-list');
 
     const syncSpeed = () => {
@@ -55,12 +73,39 @@ registerPanel({
     if (btnTrainAll) {
       btnTrainAll.addEventListener('click', () => {
         const paused = ctx.loop.togglePaused();
+        // In worker mode training runs off-thread; pausing the render loop only
+        // freezes the PREVIEW, so also stop/resume each worker's training so
+        // "Pause all" genuinely halts learning (and stats stop climbing).
+        ctx.lanes.setRunningAll(!paused);
         btnTrainAll.textContent = paused ? 'Train all' : 'Pause all';
         btnTrainAll.classList.toggle('active', !paused);
       });
       // The default-biped starting lane is added by boot; the loop is running,
       // so the toggle label starts as "Pause all".
       btnTrainAll.textContent = 'Pause all';
+    }
+
+    // ---- Instances (parallel training envs per lane's worker) ----
+    if (sliderInstances) {
+      sliderInstances.value = String(ctx.lanes.instances);
+      if (valInstances) valInstances.textContent = String(ctx.lanes.instances);
+      sliderInstances.addEventListener('input', () => {
+        const v = ctx.lanes.setInstancesAll(Number(sliderInstances.value));
+        sliderInstances.value = String(v);
+        if (valInstances) valInstances.textContent = String(v);
+      });
+    }
+
+    // ---- Training throughput readout (focused lane), refreshed per frame ----
+    if (valSps) {
+      ctx.onFrame(() => {
+        const lane = ctx.lanes.focusedLane();
+        const sps = lane && lane.trainer ? lane.trainer.stepsPerSec || 0 : 0;
+        const inst = lane && lane.trainer ? lane.trainer.instances : ctx.lanes.instances;
+        valSps.textContent = sps
+          ? `training: ${Math.round(sps).toLocaleString()} steps/s · ${inst} envs`
+          : 'training: warming up…';
+      });
     }
 
     if (btnAddLane)

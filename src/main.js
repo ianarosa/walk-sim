@@ -168,5 +168,16 @@ canvas.addEventListener('pointercancel', () => {
 appctx.addLane(defaultBiped(), { name: 'Default Biped' });
 loop.start();
 
+// Each lane owns a background training Worker (see app/worker-lane.js). Browsers
+// reclaim workers on unload anyway, but terminate them explicitly so a reload
+// never briefly runs two generations of workers competing for the CPU.
+window.addEventListener('beforeunload', () => {
+  try {
+    lanes.disposeAll();
+  } catch {
+    /* ignore */
+  }
+});
+
 // Debug handles (harmless; this is a static toy).
 window.walkSim = { lanes, editor: appctx.editor, ctx: appctx, loop, app, CONFIG };

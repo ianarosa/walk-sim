@@ -7,7 +7,7 @@
  *     id:       number,          // unique, monotonic
  *     name:     string,          // shown in its cell + the sidebar
  *     creature: Creature,        // pristine plain-data body (for reset/save)
- *     trainer:  Trainer,         // owns its own Sim (trainer.sim), learns
+ *     trainer:  WorkerLane,      // owns a display Sim (trainer.sim) + a worker
  *     camera:   Camera,          // follows THIS lane's root in THIS cell
  *     error:    string|null,     // set if trainer.tick() ever throws
  *   }
@@ -17,23 +17,28 @@
  * across the top and everyone else tiles into a thin strip along the bottom,
  * and the sidebar shows the focused lane's stats + reward graph.
  *
- * Each frame the owner calls `tickAll()` (advance every trainer one control
- * step — the fixed-timestep Loop multiplies this by the speed factor) and then
- * `draw(ctx)` (paint every cell). We never step physics directly here; the
- * Trainer owns stepping via `trainer.tick()`.
+ * PHASE 2: each lane's `trainer` is a WorkerLane (app/worker-lane.js), NOT the
+ * single-env Trainer. Training runs in a background Worker (N parallel envs,
+ * one brain) at full speed; tickAll() only advances the on-screen PREVIEW (one
+ * control step of the display sim, driven by the latest greedy brain snapshot).
+ * Training therefore no longer scales with the render "speed" — the speed
+ * factor now just fast-forwards the preview.
  *
- * RL CONTRACT (see src/rl/agent.js):
- *   new Trainer(sim)            -> infers obs/action sizes from the sim
- *   trainer.tick()              -> one control step; {reward,done,distance,episode}
- *   trainer.exploit (bool)      -> greedy (show best gait) when true
- *   trainer.episode / .bestDistance / .lastReturn / .returnHistory  (stats)
- *   trainer.serialize()         -> JSON-safe brain bundle
- *   Trainer.fromJSON(sim, json) -> restore a brain onto a matching sim (throws
- *                                  on size mismatch)
+ * Each frame the owner calls `tickAll()` (advance every preview one step — the
+ * fixed-timestep Loop multiplies this by the speed factor) then `draw(ctx)`.
+ *
+ * LANE CONTRACT (see app/worker-lane.js — a drop-in for the old Trainer):
+ *   new WorkerLane(creature, {instances, brain})  -> spawns a training worker
+ *   trainer.sim                 -> the display Sim we render/follow
+ *   trainer.tick()              -> one preview control step; {done, distance}
+ *   trainer.exploit (bool)      -> kept for API compat (preview is always greedy)
+ *   trainer.episode / .bestDistance / .lastReturn / .stepCount /
+ *     .returnHistory / .stepsPerSec        -> stats mirrored from the worker
+ *   trainer.serialize()         -> Promise<JSON brain bundle> (ASYNC)
+ *   trainer.setInstances(n) / .setRunning(on) / .loadBrain(json) / .dispose()
  */
 
-import { Sim } from '../physics/sim.js';
-import { Trainer } from '../rl/agent.js';
+import { WorkerLane } from './worker-lane.js';
 import { Camera } from '../ui/camera.js';
 import { drawSim } from '../render.js';
 import { validateCreature, cloneCreature } from '../creature.js';
@@ -48,6 +53,10 @@ export class LaneManager {
     this.focusId = null; // id of the focused lane (big cell + sidebar stats)
     this.viewW = 1; // shared canvas size (CSS px)
     this.viewH = 1;
+    // Parallel training envs PER LANE (each lane's worker trains this many
+    // copies of one brain). Global default; the instances control retargets it
+    // and forwards to every live lane via setInstancesAll().
+    this.instances = 8;
   }
 
   /** call on resize; CSS pixels. */
@@ -57,29 +66,23 @@ export class LaneManager {
   }
 
   /**
-   * addLane(creature, {name, brain}?) — build a Sim + Trainer for a creature
-   * and append a lane. If `brain` is provided we try Trainer.fromJSON; on a
-   * size mismatch we fall back to a fresh brain and return a `warn` string so
-   * the caller can surface a friendly "body loaded, brain didn't fit" message.
+   * addLane(creature, {name, brain}?) — build a WorkerLane for a creature and
+   * append a lane. If `brain` is provided the WorkerLane size-checks it; on a
+   * mismatch it starts a fresh brain and exposes a `warn` string so the caller
+   * can surface a friendly "body loaded, brain didn't fit" message.
    * Returns { lane, warn }.
    */
   addLane(creature, { name, brain } = {}) {
     validateCreature(creature);
     const c = cloneCreature(creature);
-    const sim = new Sim(c);
 
-    let trainer;
-    let warn = null;
-    if (brain) {
-      try {
-        trainer = Trainer.fromJSON(sim, brain);
-      } catch (e) {
-        warn = `brain didn't fit this body (${e.message || e}) — started a fresh one`;
-        trainer = new Trainer(sim);
-      }
-    } else {
-      trainer = new Trainer(sim);
-    }
+    // A WorkerLane is a DROP-IN for the old per-lane Trainer: it owns a display
+    // Sim (trainer.sim), advances a preview via tick(), mirrors training stats,
+    // and spawns a background worker (or a main-thread fallback) that trains N
+    // parallel copies of ONE brain. A supplied brain is size-checked
+    // synchronously; a mismatch surfaces as trainer.warn (fresh brain started).
+    const trainer = new WorkerLane(c, { instances: this.instances, brain });
+    const warn = trainer.warn || null;
 
     const lane = {
       id: _nextId++,
@@ -89,8 +92,7 @@ export class LaneManager {
       camera: new Camera(),
       error: null,
       // --- fall -> reset -> retry bookkeeping (see tickAll/draw) ---
-      lastEpisode: trainer.episode != null ? trainer.episode : 0,
-      pendingReset: false, // a tick() this frame returned {done:true}
+      pendingReset: false, // a preview tick() this frame returned {done:true}
       resetFlash: 0, // frames left to paint the "RESET" flash overlay
     };
     // Snap the camera onto the root so the cell doesn't glide in from x=0.
@@ -106,6 +108,10 @@ export class LaneManager {
 
   /** removeLane(id) — drop a lane; re-focus another if we removed the focus. */
   removeLane(id) {
+    const lane = this.laneById(id);
+    if (lane && lane.trainer && typeof lane.trainer.dispose === 'function') {
+      lane.trainer.dispose(); // terminate its worker so it stops training
+    }
     this.lanes = this.lanes.filter((l) => l.id !== id);
     if (this.focusId === id) {
       this.focusId = this.lanes.length ? this.lanes[0].id : null;
@@ -136,19 +142,53 @@ export class LaneManager {
   resetLane(id) {
     const lane = this.laneById(id);
     if (!lane) return;
-    const sim = new Sim(lane.creature);
-    lane.trainer = new Trainer(sim);
+    if (lane.trainer && typeof lane.trainer.dispose === 'function') {
+      lane.trainer.dispose(); // kill the old worker before spawning a fresh one
+    }
+    lane.trainer = new WorkerLane(lane.creature, { instances: this.instances });
     lane.error = null;
-    lane.lastEpisode = sim && lane.trainer.episode != null ? lane.trainer.episode : 0;
     lane.pendingReset = false;
     lane.resetFlash = 0;
-    lane.camera.snap(sim.rootPosition().x);
+    try {
+      lane.camera.snap(lane.trainer.sim.rootPosition().x);
+    } catch {
+      /* display sim not ready — follow() catches up */
+    }
   }
 
   /** setExploit(id, on) — flip a lane's greedy/exploit flag. */
   setExploit(id, on) {
     const lane = this.laneById(id);
     if (lane) lane.trainer.exploit = !!on;
+  }
+
+  /**
+   * setInstancesAll(n) — set the parallel-env count for every lane's worker and
+   * remember it as the default for lanes added later. Returns the clamped value.
+   */
+  setInstancesAll(n) {
+    this.instances = Math.max(1, Math.floor(n));
+    for (const lane of this.lanes) {
+      if (lane.trainer && typeof lane.trainer.setInstances === 'function')
+        lane.trainer.setInstances(this.instances);
+    }
+    return this.instances;
+  }
+
+  /** setRunningAll(on) — start/stop background training on every lane. */
+  setRunningAll(on) {
+    for (const lane of this.lanes) {
+      if (lane.trainer && typeof lane.trainer.setRunning === 'function')
+        lane.trainer.setRunning(!!on);
+    }
+  }
+
+  /** disposeAll() — terminate every lane's worker (e.g. on page unload). */
+  disposeAll() {
+    for (const lane of this.lanes) {
+      if (lane.trainer && typeof lane.trainer.dispose === 'function')
+        lane.trainer.dispose();
+    }
   }
 
   /**
@@ -249,15 +289,15 @@ export class LaneManager {
 
       const sim = lane.trainer.sim;
 
-      // Detect a fall -> reset boundary two ways (a tick returned done, or the
-      // episode counter advanced) and make it VISIBLE: the Trainer has already
-      // snapped the body back to the start pose, so we SNAP the camera back to
-      // the start x too (instead of gliding) and flash a "RESET" badge.
-      const ep = lane.trainer.episode != null ? lane.trainer.episode : 0;
-      const didReset = lane.pendingReset || ep !== lane.lastEpisode;
+      // Detect a fall -> reset boundary from the PREVIEW's own tick (which
+      // returned {done:true} this frame) and make it VISIBLE: the preview has
+      // already reset the display sim to the start pose, so we SNAP the camera
+      // back to the start x (instead of gliding) and flash a "RESET" badge. We
+      // deliberately do NOT key off trainer.episode here — in worker mode that
+      // is the aggregate TRAINING episode count and jumps many times per frame.
+      const didReset = lane.pendingReset;
       if (didReset) {
         lane.pendingReset = false;
-        lane.lastEpisode = ep;
         lane.resetFlash = 18; // ~0.3s of flash at 60fps
       }
       try {

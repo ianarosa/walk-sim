@@ -61,13 +61,17 @@ registerPanel({
       ctx.setMsg(`Saved body "${name}".`, 'ok');
     };
 
-    const saveBundle = () => {
+    // trainer.serialize() is now ASYNC (it round-trips to the training worker
+    // for the current brain), so the save/export handlers await it and report a
+    // "saving…" hint while the reply is in flight.
+    const saveBundle = async () => {
       const lane = focused();
       if (!lane) return ctx.setMsg('No lane to save.', 'err');
       const name = slotNameOr(lane.name);
       let brain = null;
       try {
-        brain = lane.trainer.serialize();
+        ctx.setMsg(`Saving "${name}"…`);
+        brain = await lane.trainer.serialize();
       } catch (e) {
         return ctx.setMsg(`Could not serialize brain: ${e.message || e}`, 'err');
       }
@@ -76,12 +80,13 @@ registerPanel({
       ctx.setMsg(`Saved body + brain "${name}".`, 'ok');
     };
 
-    const exportFile = () => {
+    const exportFile = async () => {
       const lane = focused();
       if (!lane) return ctx.setMsg('No lane to export.', 'err');
       let brain = null;
       try {
-        brain = lane.trainer.serialize();
+        ctx.setMsg('Exporting…');
+        brain = await lane.trainer.serialize();
       } catch {
         brain = null; // export body-only if the brain can't be serialized
       }

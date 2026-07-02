@@ -7,9 +7,12 @@
  *      JSON blob under a namespaced key. A slot is either:
  *        - kind:'creature'  { creature }                — just the body, or
  *        - kind:'bundle'    { creature, brain }         — body + trained brain
- *      where `brain` is whatever `trainer.serialize()` returned (an opaque,
- *      JSON-safe object we never introspect — we just hand it back to
- *      `Trainer.fromJSON`).
+ *      where `brain` is whatever `trainer.serialize()` resolved to (an opaque,
+ *      JSON-safe object we never introspect — we just hand it back to the
+ *      trainer to restore). As of Phase 2 `serialize()` is ASYNC (the brain is
+ *      fetched from the background training worker), so callers AWAIT it before
+ *      handing the resolved value to saveBundle()/exportBundle() here; the
+ *      on-disk shape is unchanged.
  *
  *   2. File export/import — a portable `.walkbrain.json` artifact bundling
  *      { version, kind:'walkbrain', creature, brain }. Export builds a Blob
