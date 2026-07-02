@@ -125,24 +125,36 @@ export function observe(sim, limits) {
  * scale it to motor speeds, advance the physics by CONFIG.RL.frameSkip fixed
  * sub-steps (a "control step"), then score the transition.
  *
- * REWARD — a standard locomotion reward that teaches BALANCE FIRST, then walk:
+ * REWARD — THREE PILLARS: go the FASTEST, the FURTHEST, and the SMOOTHEST.
+ * Balance is no longer a goal; it is only the minimal PREREQUISITE that keeps
+ * the other three honest (you can't be fast/far/smooth face-down).
  *
- *   reward = aliveBonus                       // big base: just staying up pays
- *          + wVel * min(avgVx, vTarget)·G     // forward velocity, CAPPED,
- *                                             //   only when upright (gate G)
- *          - wUpright * rootAngle^2           // keep the torso vertical
- *          - wHeight  * (rootY - targetH)^2   // keep it standing tall (no crouch)
- *          - wEnergy  * mean(action^2)        // don't thrash the motors
- *          - wSmooth  * mean(Δaction^2)       // don't jitter frame-to-frame
+ *   reward = aliveBonus                       // minimal support: don't faceplant
+ *          + wVel      * speed·G              // FASTEST: forward speed, UNCAPPED
+ *          + wProgress * dx·G                 // FURTHEST: net forward ΔX this step
+ *          - wSmooth   * mean(Δaction^2)      // SMOOTHEST: no frame-to-frame jitter
+ *          - wJerk     * mean((Δjointspeed·speedScale)^2)  // SMOOTHEST: no twitching
+ *          - wUpright  * rootAngle^2          // minimal balance support
+ *          - wHeight   * (rootY - targetH)^2  // minimal height support (no crouch cheat)
+ *          - wEnergy   * mean(action^2)       // tiny motor-effort tax
  *
- * where avgVx = ΔrootX / controlDt (average forward speed this control step)
- * and the gate G = 1 only while |rootAngle| < uprightThresh (else 0), so the
- * agent cannot cheat by diving/faceplanting forward — progress only counts
- * while it is actually balanced. aliveBonus is the dominant base term, so the
- * gradient is "stand up" first and "walk" second. All knobs come from CONFIG.RL.
+ * where, with controlDt = frameSkip·dt and dx = ΔrootX this control step:
+ *   avgVx = dx / controlDt      (average forward speed this control step)
+ *   G     = 1 only while |rootAngle| < uprightThresh, else 0
+ *   speed = G ? avgVx : 0                      // FASTEST term, SIGNED, no cap
+ *   dx    = G ? ΔrootX : 0                      // FURTHEST term, SIGNED
+ * The speed/progress terms are SIGNED while upright (forward paid, BACKWARD
+ * penalized) so the deterministic greedy gait reliably faces forward. The
+ * upright gate G keeps uprightness purely INSTRUMENTAL: the agent cannot win
+ * the speed/distance terms by diving forward, but staying up is not itself the
+ * objective — it is worth only the small aliveBonus. Removing the velocity cap
+ * makes "faster is always better"; the explicit progress term makes "covering
+ * ground is directly paid"; the strong smoothness+jerk penalties make the gait
+ * un-twitchy. Speed + distance + smoothness dominate; balance is a floor, not a
+ * ceiling. All knobs come from CONFIG.RL.
  *
- * done when the root falls below fallHeight, tilts past maxTilt, or the
- * episode reaches maxEpisodeSteps.
+ * done when the root falls below fallHeight, tilts past maxTilt, or the episode
+ * reaches maxEpisodeSteps — so falling early directly costs distance (FURTHEST).
  */
 export class Env {
   constructor(sim) {
@@ -152,6 +164,7 @@ export class Env {
     this.startX = 0;
     this.prevX = 0;
     this.prevAction = null; // last squashed action, for the smoothness penalty
+    this.prevSpeeds = null; // last joint speeds (by id), for the jerk penalty
   }
 
   /** Rebuild the sim to its rest pose and return the first observation. */
@@ -164,6 +177,7 @@ export class Env {
     this.startX = p.x;
     this.prevX = p.x;
     this.prevAction = null;
+    this.prevSpeeds = null;
     return observe(this.sim, this.limits);
   }
 
@@ -201,27 +215,49 @@ export class Env {
     for (let s = 0; s < rl.frameSkip; s++) this.sim.step(CONFIG.dt);
     this.stepInEpisode += 1;
 
-    // --- Reward ---
+    // Joint jerk: mean squared change in joint speed (rad/s) between control
+    // steps — an angular-acceleration proxy that penalizes twitchy motors. We
+    // scale by speedScale (same as the obs) to keep it O(1) alongside energy.
+    const jointSpeeds = this.sim.jointSpeeds();
+    let jerk = 0;
+    let jc = 0;
+    for (const id of this.sim.jointOrder) {
+      const prev = this.prevSpeeds ? this.prevSpeeds[id] : jointSpeeds[id];
+      const d = (jointSpeeds[id] - prev) * rl.speedScale;
+      jerk += d * d;
+      jc += 1;
+    }
+    jerk /= jc || 1;
+    this.prevSpeeds = jointSpeeds;
+
+    // --- Reward: FASTEST + FURTHEST + SMOOTHEST (see class docstring) ---
     const pos = this.sim.rootPosition();
     const ang = this.sim.rootAngle();
     const controlDt = rl.frameSkip * CONFIG.dt;
-    const avgVx = (pos.x - this.prevX) / controlDt; // avg forward speed this step
+    const dxRaw = pos.x - this.prevX; // net forward advance this control step (m)
+    const avgVx = dxRaw / controlDt; // average forward speed this step (m/s)
     this.prevX = pos.x;
 
-    // Forward reward: capped at vTarget and gated on being upright, so the
-    // agent can't rack up progress by diving forward and faceplanting.
+    // Upright gate keeps speed/distance honest (no diving) WITHOUT making
+    // balance an objective — being up is worth only the small aliveBonus. When
+    // upright the speed/progress terms are SIGNED (forward paid, BACKWARD
+    // penalized): this breaks the fwd/bwd symmetry so the DETERMINISTIC (greedy)
+    // gait reliably faces forward instead of drifting into a backward-walking
+    // basin. Uncapped, so faster forward is always strictly better.
     const upright = Math.abs(ang) < rl.uprightThresh;
-    const cappedVx = avgVx < rl.vTarget ? avgVx : rl.vTarget;
-    const fwd = upright && cappedVx > 0 ? cappedVx : 0;
+    const speed = upright ? avgVx : 0; // FASTEST (uncapped, signed)
+    const dx = upright ? dxRaw : 0; // FURTHEST (net progress, signed)
     const heightErr = pos.y - rl.targetHeight;
 
     const reward =
       rl.aliveBonus +
-      rl.wVel * fwd -
+      rl.wVel * speed +
+      rl.wProgress * dx -
+      rl.wSmooth * smooth -
+      rl.wJerk * jerk -
       rl.wUpright * ang * ang -
       rl.wHeight * heightErr * heightErr -
-      rl.wEnergy * energy -
-      rl.wSmooth * smooth;
+      rl.wEnergy * energy;
 
     // --- Termination ---
     const fell = pos.y < rl.fallHeight;

@@ -21,23 +21,39 @@ export const rlConfig = Object.freeze({
     horizon: 2048, // transitions collected before each PPO update
     entCoef: 0.0, // entropy bonus coefficient (0 = off)
     vfCoef: 0.5, // value-loss weight
-    initLogStd: -0.5, // initial per-action log-std (exploration scale)
+    initLogStd: -1.0, // initial per-action log-std (was -0.5). Tighter exploration
+    // keeps the GREEDY/deterministic gait (what Exploit + live preview render)
+    // close to the sampled behavior, so the mean policy reliably walks forward
+    // instead of lagging in a stuck/backward basin.
     // Episode / control
     maxEpisodeSteps: 1000, // control steps before a timeout reset
     frameSkip: 4, // fixed physics steps per control step
     maxMotorSpeed: 5, // rad/s a |action|=1 commands to a motor (was 8: too violent)
     fallHeight: 0.6, // root y below this => the creature has fallen
     maxTilt: 1.0, // |rootAngle| above this (rad) => toppled
-    // Reward shaping — balance-first locomotion (see rl/env.js for the formula).
-    aliveBonus: 1.0, // per-step reward for staying up (dominant BASE term)
-    wVel: 1.0, // weight on capped forward velocity min(avgVx, vTarget)
-    vTarget: 1.4, // m/s cap on the forward-velocity reward (don't over-sprint)
-    uprightThresh: 0.5, // rad; forward reward only counts while |rootAngle| < this
+    // Reward shaping — THREE PILLARS: FASTEST + FURTHEST + SMOOTHEST.
+    // (see rl/env.js for the exact formula). Balance terms are deliberately
+    // MINIMAL — just enough to stop faceplanting/flailing and to keep the
+    // deterministic gait stable — so the three pillars dominate the gradient.
+    // vTarget is gone: faster is always better. Verified in a headless PPO
+    // harness (real planck) that the GREEDY gait is faster + further + smoother
+    // than the old capped reward across seeds, with no NaNs and no flailing.
+    aliveBonus: 1.0, // minimal per-step "stay up" support — a FLOOR, not the goal.
+    //   forward reward (~wVel*vx + wProgress*dx ≈ 3.2 at 1.8 m/s) still dominates
+    //   it; tuned up from 0.4 so the deterministic gait reliably stays upright.
+    // FASTEST: reward forward speed with NO cap (was min(avgVx, vTarget)).
+    wVel: 1.0, // weight on uncapped SIGNED forward speed (avgVx, upright-gated)
+    // FURTHEST: reward net forward progress directly (ΔrootX this control step).
+    wProgress: 12.0, // weight on SIGNED forward ΔX per step (upright-gated)
+    uprightThresh: 0.5, // rad; speed/progress only count while |rootAngle| < this (gate)
+    // SMOOTHEST: first-class anti-jitter penalties.
+    wSmooth: 2.0, // penalty weight on mean(Δaction^2) — kills frame-to-frame jitter (was 0.05)
+    wJerk: 0.6, // penalty weight on mean((Δjointspeed·speedScale)^2) — kills motor twitching
+    // Minimal balance/effort support (prerequisite, not objective).
     targetHeight: 1.25, // desired torso height (m); penalize deviation (no crouch cheat)
-    wHeight: 3.0, // penalty weight on (rootY - targetHeight)^2
-    wUpright: 0.3, // penalty weight on rootAngle^2
-    wEnergy: 0.05, // penalty weight on mean(action^2)
-    wSmooth: 0.05, // penalty weight on mean(Δaction^2) — reduces jitter/flailing
+    wHeight: 2.0, // penalty weight on (rootY - targetHeight)^2 (was 3.0)
+    wUpright: 0.35, // penalty weight on rootAngle^2
+    wEnergy: 0.05, // penalty weight on mean(action^2) — tiny motor-effort tax
     // Observation
     speedScale: 0.1, // scales joint speeds (rad/s) into the obs vector
     // UI
