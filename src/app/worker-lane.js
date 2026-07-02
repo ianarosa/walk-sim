@@ -45,7 +45,8 @@ import { CONFIG } from '../config.js';
 // so the fallback stays responsive (it is a degraded mode, not the norm).
 const FALLBACK_STEPS = 8;
 const BRAIN_TIMEOUT_MS = 5000; // guard for a lost getBrain reply
-const MAX_WORKERS = 8; // cap on worker shards per lane
+const MAX_WORKERS = 1; // cap on worker shards per lane (1 = single worker; the
+// sharding/weight-averaging code stays intact and reactivates if raised >1)
 
 export class WorkerLane {
   /**
@@ -192,7 +193,11 @@ export class WorkerLane {
       return;
     }
     this._pendingBrain = null;
-    this._startMergeTimer();
+    // Weight-averaging only makes sense across MULTIPLE shards. With a single
+    // worker the "average" is its own ~mergeMs-stale brain, so re-applying it
+    // would REVERT that interval of training every tick — so skip the merge
+    // loop entirely and let the 100ms 'brain' snapshots drive the preview.
+    if (this._aliveSlots().length > 1) this._startMergeTimer();
   }
 
   /**
