@@ -12,22 +12,33 @@
  *   EDITOR — draw a creature (bodies + limited hinges) and spawn it into a new
  *            lane (Editor).
  *
- * The Sidebar (frosted glass) wires all the controls, the lane/slot lists and
- * the focused-lane stats + reward graph. Storage handles save/load and file
- * export/import. planck is expected on window.planck (a plain <script> before
- * this module); we never import planck — the physics modules read the global.
+ * The SIDEBAR is assembled from self-contained panels (src/ui/panels/*.js).
+ * Each panel self-registers via ui/registry.js on import; the only wiring this
+ * entry file does is: import each panel (one line each), build the shared `ctx`
+ * (createCtx), and mount the panels (mountPanels). The editor instance is
+ * created by the editor panel and exposed on ctx.editor for pointer routing.
+ *
+ * planck is expected on window.planck (a plain <script> before this module);
+ * we never import planck — the physics modules read the global.
  */
 
 import { CONFIG } from './config.js';
 import { defaultBiped } from './creature.js';
 import { Loop } from './ui/loop.js';
-import { Sidebar } from './ui/controls.js';
-import { Editor } from './ui/editor.js';
 import { LaneManager } from './app/lanes.js';
+import { createCtx, mountPanels } from './ui/controls.js';
+
+// Panel modules self-register on import. This is the ONLY shared file that
+// changes when adding a sidebar feature: add one import line here.
+import './ui/panels/mode.js';
+import './ui/panels/train.js';
+import './ui/panels/graph.js';
+import './ui/panels/saveload.js';
+import './ui/panels/editor.js';
 
 // --- Canvas & context ---------------------------------------------------
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('sim'));
-const ctx = canvas.getContext('2d');
+const ctx2d = canvas.getContext('2d');
 
 // Shared app state (mode is read every frame by the render dispatcher).
 const app = { mode: 'train' };
@@ -37,16 +48,32 @@ let viewW = window.innerWidth;
 let viewH = window.innerHeight;
 
 const lanes = new LaneManager();
-const editor = new Editor({
-  onSpawn: (creature) => {
-    const lane = sidebar._addLane(creature, { name: creature.name });
-    if (lane) {
-      sidebar.setMode('train'); // jump to the grid to watch it train
-      sidebar.closeDrawer(); // on mobile, reveal the canvas
-    }
+
+// --- Loop ---------------------------------------------------------------
+// onStep advances every lane's trainer ONE control step; the Loop calls it
+// `speed` times per frame (so speed == control-steps-per-frame per lane).
+// onRender clears the transparent canvas and paints the active mode.
+const loop = new Loop(
+  () => {
+    if (app.mode === 'train') lanes.tickAll();
   },
-  onMessage: (msg, kind) => sidebar.setMsg(msg, kind),
-});
+  () => {
+    ctx2d.clearRect(0, 0, viewW, viewH);
+    if (app.mode === 'editor') {
+      if (appctx.editor) appctx.editor.draw(ctx2d);
+    } else {
+      lanes.draw(ctx2d);
+    }
+    appctx.frame();
+  }
+);
+
+// --- Shared context + sidebar panels ------------------------------------
+// createCtx builds the app-wide services (setMsg / addLane / refresh / frame /
+// mode + drawer). mountPanels injects + wires every registered panel and — as
+// a side effect of the editor panel — constructs appctx.editor.
+const appctx = createCtx({ canvas, ctx2d, lanes, editor: null, loop, app });
+mountPanels(appctx);
 
 /**
  * resize() — match the canvas backing store to viewport * devicePixelRatio,
@@ -61,9 +88,9 @@ function resize() {
   canvas.height = Math.round(viewH * dpr);
   canvas.style.width = viewW + 'px';
   canvas.style.height = viewH + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
   lanes.setViewport(viewW, viewH);
-  editor.setViewport(viewW, viewH);
+  if (appctx.editor) appctx.editor.setViewport(viewW, viewH);
 }
 window.addEventListener('resize', resize);
 // Phones fire orientationchange (and shift the visual viewport as the URL bar
@@ -72,25 +99,6 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
-
-// --- Loop ---------------------------------------------------------------
-// onStep advances every lane's trainer ONE control step; the Loop calls it
-// `speed` times per frame (so speed == control-steps-per-frame per lane).
-// onRender clears the transparent canvas and paints the active mode.
-const loop = new Loop(
-  () => {
-    if (app.mode === 'train') lanes.tickAll();
-  },
-  () => {
-    ctx.clearRect(0, 0, viewW, viewH);
-    if (app.mode === 'editor') editor.draw(ctx);
-    else lanes.draw(ctx);
-    sidebar.updateHud();
-  }
-);
-
-// --- Sidebar (needs lanes, editor, loop, app) ---------------------------
-const sidebar = new Sidebar({ laneManager: lanes, editor, loop, app });
 
 // --- Pointer routing ----------------------------------------------------
 // In EDITOR mode the canvas drives the editor (draw/drag). In TRAIN mode a
@@ -110,7 +118,7 @@ canvas.addEventListener(
     e.preventDefault();
     const { x, y } = cssXY(e);
     if (app.mode === 'editor') {
-      editor.onPointerDown(x, y);
+      if (appctx.editor) appctx.editor.onPointerDown(x, y);
       try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     } else {
       downXY = { x, y };
@@ -124,7 +132,7 @@ canvas.addEventListener(
     if (app.mode !== 'editor') return;
     e.preventDefault();
     const { x, y } = cssXY(e);
-    editor.onPointerMove(x, y);
+    if (appctx.editor) appctx.editor.onPointerMove(x, y);
   },
   { passive: false }
 );
@@ -134,14 +142,14 @@ canvas.addEventListener(
     e.preventDefault();
     const { x, y } = cssXY(e);
     if (app.mode === 'editor') {
-      editor.onPointerUp(x, y);
+      if (appctx.editor) appctx.editor.onPointerUp(x, y);
     } else if (downXY) {
       // Treat a near-stationary press/release as a click-to-focus (tap-safe).
       if (Math.hypot(x - downXY.x, y - downXY.y) < TAP_SLOP) {
         const id = lanes.hitTest(x, y);
         if (id != null) {
           lanes.focus(id);
-          sidebar.refresh();
+          appctx.refresh();
         }
       }
       downXY = null;
@@ -152,13 +160,13 @@ canvas.addEventListener(
 // If a touch/pointer is cancelled mid-gesture (e.g. system gesture), end any
 // active editor drag cleanly instead of leaving a body "stuck" to the finger.
 canvas.addEventListener('pointercancel', () => {
-  if (app.mode === 'editor') editor.onPointerUp();
+  if (app.mode === 'editor' && appctx.editor) appctx.editor.onPointerUp();
   downXY = null;
 });
 
 // --- Seed one lane and go ----------------------------------------------
-sidebar._addLane(defaultBiped(), { name: 'Default Biped' });
+appctx.addLane(defaultBiped(), { name: 'Default Biped' });
 loop.start();
 
 // Debug handles (harmless; this is a static toy).
-window.walkSim = { lanes, editor, sidebar, loop, app, CONFIG };
+window.walkSim = { lanes, editor: appctx.editor, ctx: appctx, loop, app, CONFIG };
