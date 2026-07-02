@@ -377,37 +377,18 @@
         <div class="section-title">Tool</div>
         <div class="segmented">
           <label><input type="radio" name="editor-tool" id="editor-tool-select" value="select" checked /><span>Select</span></label>
-          <label><input type="radio" name="editor-tool" id="editor-tool-box" value="box" /><span>Box</span></label>
-          <label><input type="radio" name="editor-tool" id="editor-tool-circle" value="circle" /><span>Circle</span></label>
-          <label><input type="radio" name="editor-tool" id="editor-tool-joint" value="joint" /><span>Joint</span></label>
+          <label><input type="radio" name="editor-tool" id="editor-tool-cell" value="cell" /><span>Fill / Erase</span></label>
+          <label><input type="radio" name="editor-tool" id="editor-tool-joint" value="joint" /><span>Joint (line)</span></label>
         </div>
-        <label class="toggle">
-          <span>Snap to grid</span>
-          <input id="chk-snap" type="checkbox" />
-        </label>
-        <p class="hint">Click the canvas to drop a segment (resize it in the Body panel below). In <b>Joint</b> mode click two segments to hinge them. Pick <b>Select</b> to move parts, drag the pivot, or drag the <b>L</b>/<b>U</b> handles to set the movement limits (the shaded arc shows the allowed swing).</p>
+        <p class="hint">Tap a grid cell to fill it (tap again to clear). Adjacent cells fuse into one part. In <b>Joint (line)</b> mode tap the line between two filled cells to hinge them — the joint splits that part in two. Pick <b>Select</b> to tap a part (mark root/feet or delete) or tap a joint and drag the <b>L</b>/<b>U</b> handles to set its limits.</p>
       </div>
 
-      <!-- Selected body -->
+      <!-- Selected part (fused component) -->
       <div class="section" id="editor-body-panel" style="display:none;">
-        <div class="section-title">Body — <span id="editor-body-title"></span></div>
-        <div class="row" id="editor-body-size-box">
-          <div class="field">
-            <div class="label-row"><label for="editor-body-w">Width (m)</label></div>
-            <input id="editor-body-w" type="number" min="0.06" step="0.05" value="0.4" />
-          </div>
-          <div class="field">
-            <div class="label-row"><label for="editor-body-h">Height (m)</label></div>
-            <input id="editor-body-h" type="number" min="0.06" step="0.05" value="0.4" />
-          </div>
-        </div>
-        <div class="field" id="editor-body-size-circle" style="display:none;">
-          <div class="label-row"><label for="editor-body-r">Radius (m)</label></div>
-          <input id="editor-body-r" type="number" min="0.06" step="0.05" value="0.2" />
-        </div>
+        <div class="section-title">Part — <span id="editor-body-title"></span></div>
         <label class="toggle"><span>Root (torso)</span><input id="chk-body-root" type="checkbox" /></label>
-        <label class="toggle"><span>Foot (ground sensor)</span><input id="chk-body-foot" type="checkbox" /></label>
-        <button id="btn-body-delete" type="button">Delete body</button>
+        <label class="toggle"><span>Feet (ground sensor)</span><input id="chk-body-foot" type="checkbox" /></label>
+        <button id="btn-body-delete" type="button">Delete part</button>
       </div>
 
       <!-- Selected joint -->
@@ -439,7 +420,7 @@
           <button id="btn-editor-spawn" type="button">Spawn / Train this</button>
         </div>
         <div class="row">
-          <button id="btn-editor-load" type="button">Load biped</button>
+          <button id="btn-editor-load" type="button">Load example</button>
           <button id="btn-editor-clear" type="button">Clear</button>
         </div>
       </div>

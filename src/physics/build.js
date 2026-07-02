@@ -71,18 +71,29 @@ export function buildWorld(creature) {
       angle: b.angle || 0,
     });
 
-    let shape;
-    if (b.shape === 'box') {
-      shape = new Box(b.w / 2, b.h / 2); // schema is FULL w/h; planck wants HALF
-    } else {
-      shape = new Circle(b.r);
-    }
+    const density = b.density != null ? b.density : 1;
+    const friction = b.friction != null ? b.friction : 0.6;
 
-    body.createFixture({
-      shape,
-      density: b.density != null ? b.density : 1,
-      friction: b.friction != null ? b.friction : 0.6,
-    });
+    // A body may be a COMPOUND of box fixtures (grid editor) or a LEGACY single
+    // shape (defaultBiped / saved creatures). Normalize to a fixture list.
+    const fixtures =
+      Array.isArray(b.fixtures) && b.fixtures.length > 0
+        ? b.fixtures
+        : b.shape === 'circle'
+          ? [{ shape: 'circle', r: b.r, dx: 0, dy: 0 }]
+          : [{ shape: 'box', w: b.w, h: b.h, dx: 0, dy: 0 }];
+
+    for (const f of fixtures) {
+      let shape;
+      if (f.shape === 'circle') {
+        // Circle fixtures sit at the body origin (grid uses only boxes).
+        shape = new Circle(f.r);
+      } else {
+        // FULL w/h -> HALF-extents; dx,dy is the LOCAL (unrotated) center offset.
+        shape = new Box(f.w / 2, f.h / 2, new Vec2(f.dx || 0, f.dy || 0));
+      }
+      body.createFixture({ shape, density, friction });
+    }
 
     // userData lets contact listeners map fixtures back to creature ids.
     body.setUserData({
