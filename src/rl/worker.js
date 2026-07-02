@@ -17,22 +17,29 @@
  *   globalThis.window = globalThis, dynamic-import the vendor bundle, THEN
  *   dynamic-import trainer-core. Nothing sim-related is imported statically.
  *
+ * This worker is PER-SHARD: it doesn't know it's one of several sharding one
+ * lane. The orchestrator (app/worker-lane.js) periodically pulls each shard's
+ * FULL brain ({type:'full'} broadcast), averages them (rl/brain-merge.js), and
+ * pushes the average back with {type:'mergeBrain'}, which we adopt IN PLACE.
+ *
  * MESSAGE PROTOCOL (postMessage both ways):
  *   IN  init {creature, instances, config}   build a ParallelTrainer
  *       setInstances {n}                      grow/shrink the env pool
  *       setRunning {on}                       start/stop the training loop
  *       getBrain {reqId}                      -> brainFull {reqId, json}
  *       loadBrain {reqId, json}               -> loaded {reqId, ok, error?}
+ *       mergeBrain {merged}                   adopt an averaged brain in place
  *       dispose                               stop + self.close()
  *   OUT ready   {stats}                        init completed
  *       stats   {stats}                        ~every POST_MS while running
- *       brain   {snapshot}                     ~every POST_MS while running
+ *       brain   {snapshot}                     ~every POST_MS while running (preview)
+ *       full    {json}                         ~every FULL_MS while running (for merge)
  *       brainFull {reqId, json}                reply to getBrain (full serialize)
  *       loaded  {reqId, ok, error?}            reply to loadBrain
  *       error   {error}                        a training/handler error
  *
- * Robustness: safe to receive setRunning/getBrain BEFORE init (they no-op /
- * reply null); the loop only schedules once a trainer exists.
+ * Robustness: safe to receive setRunning/getBrain/mergeBrain BEFORE init (they
+ * no-op / reply null); the loop only schedules once a trainer exists.
  */
 
 let _core = null; // resolves to the trainer-core module namespace
@@ -59,10 +66,12 @@ let creatureDef = null;
 let running = false;
 let scheduled = false;
 let lastPost = 0;
+let lastFull = 0;
 
 const CHUNK = 16; // collectSteps per inner batch
 const BUDGET_MS = 15; // train up to this long before yielding to messages
-const POST_MS = 100; // stats/brain broadcast cadence (ms)
+const POST_MS = 100; // stats/brain (preview) broadcast cadence (ms)
+const FULL_MS = 1000; // full-brain (for merge) broadcast cadence (ms)
 
 function now() {
   return typeof performance !== 'undefined' && performance.now
@@ -109,6 +118,15 @@ function runBatch() {
       /* transient postMessage failure — ignore, next tick retries */
     }
   }
+  // Separate, slower cadence: the FULL brain the orchestrator averages.
+  if (t - lastFull >= FULL_MS) {
+    lastFull = t;
+    try {
+      postMessage({ type: 'full', json: trainer.serialize() });
+    } catch {
+      /* ignore — next tick retries */
+    }
+  }
   schedule();
 }
 
@@ -125,12 +143,17 @@ self.onmessage = async (e) => {
           config: m.config || {},
         });
         lastPost = 0;
+        lastFull = 0;
         postMessage({ type: 'ready', stats: trainer.stats() });
         maybeLoop();
         break;
       }
       case 'setInstances':
         if (trainer && m.n != null) trainer.setInstances(m.n);
+        break;
+      case 'mergeBrain':
+        // Adopt a fleet-averaged brain IN PLACE (no reset). Safe if not ready.
+        if (trainer) trainer.applyMergedBrain(m.merged);
         break;
       case 'setRunning':
         running = !!m.on;

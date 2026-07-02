@@ -152,6 +152,10 @@ export class ParallelTrainer {
       this.stepCount += 1;
       es.epReturn += reward;
       es.epDistance = distance;
+      // LIVE best distance: with the step-timeout removed (maxEpisodeSteps=0) an
+      // episode may run a very long time before _endEpisode fires, so update the
+      // best-so-far every step too (not only at episode end) for a live readout.
+      if (distance > this.bestDistance) this.bestDistance = distance;
       es.obs = nextRaw;
 
       if (done) this._endEpisode(es);
@@ -340,6 +344,75 @@ export class ParallelTrainer {
     }
     this.instances = n;
     return this.instances;
+  }
+
+  /**
+   * applyMergedBrain(merged) — adopt a weight-AVERAGED brain (from
+   * rl/brain-merge.js averageBrains) IN PLACE. This is how one worker shard
+   * pulls in the shared brain mid-training without disrupting anything else:
+   *   - We copy element-wise INTO the existing Float64Arrays rather than
+   *     replacing them, so the Adam optimizer's moment estimates (keyed by the
+   *     identity/length of each param slot) stay valid and continuous.
+   *   - We do NOT reset envs, buffers, episode/step stats, or Adam. Collection
+   *     continues from the current physics state on top of the merged weights.
+   * That combination is what makes a periodic merge (or a sibling's death and
+   * respawn) NON-disruptive: only the numbers in the weight arrays shift toward
+   * the fleet average; the rollout in flight is preserved.
+   *
+   * Robustness: null/shape/length mismatches are skipped silently (that array
+   * keeps its current values), and any non-finite merged value is skipped
+   * per-element (the old value is kept), so a corrupt merge can never poison a
+   * shard's weights or crash it.
+   *
+   * @param {object|null} merged  { policy:{mlp:{layers:[{W,b}]}}, logStd,
+   *                                value:{mlp:{layers:[{W,b}]}},
+   *                                normalizer:{mean,M2,count} }
+   */
+  applyMergedBrain(merged) {
+    if (!merged) return;
+    try {
+      // Copy src -> dst element-wise, only if lengths match; skip non-finite.
+      const copyInto = (dst, src) => {
+        if (!dst || !src || dst.length !== src.length) return;
+        for (let i = 0; i < dst.length; i++) {
+          const v = src[i];
+          if (Number.isFinite(v)) dst[i] = v; // else keep the existing weight
+        }
+      };
+
+      // --- Policy (actor) MLP ---
+      const pLayers = this.policy.mlp.layers;
+      const mp = merged.policy && merged.policy.mlp && merged.policy.mlp.layers;
+      if (Array.isArray(mp) && mp.length === pLayers.length) {
+        for (let l = 0; l < pLayers.length; l++) {
+          copyInto(pLayers[l].W, mp[l].W);
+          copyInto(pLayers[l].b, mp[l].b);
+        }
+      }
+
+      // --- Value (critic) MLP ---
+      const vLayers = this.value.mlp.layers;
+      const mv = merged.value && merged.value.mlp && merged.value.mlp.layers;
+      if (Array.isArray(mv) && mv.length === vLayers.length) {
+        for (let l = 0; l < vLayers.length; l++) {
+          copyInto(vLayers[l].W, mv[l].W);
+          copyInto(vLayers[l].b, mv[l].b);
+        }
+      }
+
+      // --- Policy log-std vector ---
+      copyInto(this.policy.logStd, merged.logStd);
+
+      // --- Observation normalizer running stats ---
+      if (merged.normalizer) {
+        copyInto(this.normalizer.mean, merged.normalizer.mean);
+        copyInto(this.normalizer.M2, merged.normalizer.M2);
+        if (Number.isFinite(merged.normalizer.count))
+          this.normalizer.count = merged.normalizer.count;
+      }
+    } catch {
+      /* malformed merged brain — leave current weights untouched */
+    }
   }
 
   // --- Snapshots / stats -----------------------------------------------

@@ -26,7 +26,10 @@ export const rlConfig = Object.freeze({
     // close to the sampled behavior, so the mean policy reliably walks forward
     // instead of lagging in a stuck/backward basin.
     // Episode / control
-    maxEpisodeSteps: 1000, // control steps before a timeout reset
+    // 0 = NO step-timeout: an episode ends ONLY on a fall/tilt (the user asked
+    // to remove the movement timeout so a good walker can run indefinitely).
+    // Set this > 0 to re-enable a hard control-step cap per episode (reversible).
+    maxEpisodeSteps: 0, // 0 = no timeout; episodes end on fall/tilt only
     frameSkip: 4, // fixed physics steps per control step
     maxMotorSpeed: 5, // rad/s a |action|=1 commands to a motor (was 8: too violent)
     fallHeight: 0.6, // root y below this => the creature has fallen
@@ -58,5 +61,11 @@ export const rlConfig = Object.freeze({
     speedScale: 0.1, // scales joint speeds (rad/s) into the obs vector
     // UI
     returnHistoryCap: 300, // cap on the episode-return graph history
+    // Multi-worker sharded training (see app/worker-lane.js + rl/brain-merge.js).
+    // A lane fans its instances across several Web Workers (one per CPU core, up
+    // to a small cap); every mergeMs the workers' brains are weight-AVERAGED
+    // (local-SGD / EASGD style) so they keep converging on ONE shared brain.
+    maxInstances: 128, // UI cap on total parallel training envs per lane
+    mergeMs: 1000, // weight-average cadence across a lane's worker shards (ms)
   }),
 });

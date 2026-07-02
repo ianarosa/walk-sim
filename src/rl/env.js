@@ -153,8 +153,11 @@ export function observe(sim, limits) {
  * un-twitchy. Speed + distance + smoothness dominate; balance is a floor, not a
  * ceiling. All knobs come from CONFIG.RL.
  *
- * done when the root falls below fallHeight, tilts past maxTilt, or the episode
- * reaches maxEpisodeSteps — so falling early directly costs distance (FURTHEST).
+ * done when the root falls below fallHeight or tilts past maxTilt — so falling
+ * early directly costs distance (FURTHEST). The step-timeout is OFF by default
+ * (CONFIG.RL.maxEpisodeSteps = 0): episodes end ONLY on a fall/tilt, letting a
+ * good walker run indefinitely. It re-enables as a hard per-episode step cap
+ * only if maxEpisodeSteps is set > 0.
  */
 export class Env {
   constructor(sim) {
@@ -262,7 +265,11 @@ export class Env {
     // --- Termination ---
     const fell = pos.y < rl.fallHeight;
     const toppled = Math.abs(ang) > rl.maxTilt;
-    const timeout = this.stepInEpisode >= rl.maxEpisodeSteps;
+    // Step-timeout is OFF when maxEpisodeSteps <= 0 (the default): episodes end
+    // ONLY on a fall/tilt, so a good walker can run indefinitely. It re-enables
+    // as a hard per-episode step cap only if that config is set > 0.
+    const timeout =
+      rl.maxEpisodeSteps > 0 && this.stepInEpisode >= rl.maxEpisodeSteps;
     const done = fell || toppled || timeout;
 
     return {

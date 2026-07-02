@@ -85,8 +85,11 @@ registerPanel({
       btnTrainAll.textContent = 'Pause all';
     }
 
-    // ---- Instances (parallel training envs per lane's worker) ----
+    // ---- Instances (total parallel training envs per lane, sharded) ----
     if (sliderInstances) {
+      sliderInstances.min = '1';
+      sliderInstances.max = String(CONFIG.RL.maxInstances); // up to 128
+      sliderInstances.step = '1';
       sliderInstances.value = String(ctx.lanes.instances);
       if (valInstances) valInstances.textContent = String(ctx.lanes.instances);
       sliderInstances.addEventListener('input', () => {
@@ -100,10 +103,14 @@ registerPanel({
     if (valSps) {
       ctx.onFrame(() => {
         const lane = ctx.lanes.focusedLane();
-        const sps = lane && lane.trainer ? lane.trainer.stepsPerSec || 0 : 0;
-        const inst = lane && lane.trainer ? lane.trainer.instances : ctx.lanes.instances;
+        const t = lane && lane.trainer;
+        const sps = t ? t.stepsPerSec || 0 : 0;
+        const inst = t ? t.instances : ctx.lanes.instances;
+        // `workers` is the live shard count (undefined on any non-worker path).
+        const w = t && t.workers != null ? t.workers : undefined;
+        const wStr = w != null ? ` · ${w}w` : '';
         valSps.textContent = sps
-          ? `training: ${Math.round(sps).toLocaleString()} steps/s · ${inst} envs`
+          ? `training: ${Math.round(sps).toLocaleString()} steps/s · ${inst} envs${wStr}`
           : 'training: warming up…';
       });
     }
