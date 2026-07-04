@@ -147,10 +147,18 @@ registerPanel({
         laneList.appendChild(empty);
         return;
       }
-      for (const lane of ctx.lanes.lanes) {
+      for (const [i, lane] of ctx.lanes.lanes.entries()) {
         const row = document.createElement('div');
         row.className = 'lane-row';
         if (lane.id === ctx.lanes.focusId) row.classList.add('focused');
+
+        // Zero-padded TRIAL INDEX (01, 02, 03…) from the lane's position in
+        // the list. Each lane is a parallel trial, so this numbering is
+        // meaningful — it's a plate figure number, not decoration.
+        const laneIdx = document.createElement('span');
+        laneIdx.className = 'lane-idx';
+        laneIdx.textContent = String(i + 1).padStart(2, '0');
+        laneIdx.title = `Trial ${i + 1}`;
 
         const name = document.createElement('button');
         name.className = 'lane-name';
@@ -202,6 +210,7 @@ registerPanel({
           ctx.refresh();
         });
 
+        row.appendChild(laneIdx);
         row.appendChild(name);
         row.appendChild(dist);
         row.appendChild(exploit);

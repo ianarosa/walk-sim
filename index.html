@@ -6,24 +6,47 @@
   <title>walk-sim — teach creatures to walk</title>
   <style>
     /* ===================================================================
-     * GLASS ON GRADIENT.
-     * A soft, slowly animated gradient "sky" fills the page. The canvas is
-     * transparent and floats over it; the sidebar/panels are frosted glass
-     * (translucent, backdrop-blurred, rounded, softly shadowed). Everything
-     * floats. The canvas renderer (render.js / editor.js) matches this look.
+     * ANIMAL LOCOMOTION — GAIT TRIALS.
+     * The sidebar is styled as a biomechanics study plate: an Eadweard
+     * Muybridge motion-study plate crossed with a field logbook. It is a
+     * matte umber "plate" pinned over the app's slowly animated pastel sky,
+     * printed with a faint blueprint grid, framed by an engraved hairline,
+     * and set in a deliberate type pairing — a CONDENSED grotesque for
+     * specimen labels + buttons, and a MONOSPACE for telemetry / numbers.
+     * The ONE bold color is a warm ochre-amber (the creatures' feet), used
+     * only for the live/active signal. The canvas renderer (render.js /
+     * editor.js) is NOT touched — it keeps its own pastel palette.
+     *
+     * NOTE ON TOKEN NAMES: the panels reference --glass / --glass-strong /
+     * --glass-border / --glass-shadow / --accent / --text / --muted /
+     * --radius etc. Those NAMES are preserved; only their VALUES are
+     * repointed to the study-plate palette (e.g. --glass is now the plate
+     * fill, --accent is amber). New tokens are added alongside.
      * =================================================================== */
     :root {
-      --text: #f4f7ff;
-      --muted: rgba(244, 247, 255, 0.72);
-      --accent: #8fd3ff;
-      --glass: rgba(255, 255, 255, 0.10);
-      --glass-strong: rgba(255, 255, 255, 0.16);
-      --glass-border: rgba(255, 255, 255, 0.28);
-      --glass-shadow: 0 12px 40px rgba(20, 24, 60, 0.35);
-      --radius: 20px;
-      --radius-sm: 12px;
-      --ok: #9be7b4;
-      --err: #ff9fb6;
+      /* --- Study-plate palette --- */
+      --text: #f3ece0;                         /* warm "albumen" off-white */
+      --muted: rgba(243, 236, 224, 0.60);
+      --accent: #f2b134;                       /* warm ochre / amber — the ONE bold color */
+      --amber-wash: rgba(242, 177, 52, 0.16);  /* faint amber field behind active state */
+      --glass: rgba(38, 31, 26, 0.82);         /* matte near-charcoal umber plate fill */
+      --glass-strong: rgba(247, 240, 230, 0.06); /* inset / control / card fill */
+      --hairline: rgba(243, 236, 224, 0.12);   /* blueprint grid + section rules */
+      --glass-border: rgba(243, 236, 224, 0.24); /* plate frame / borders */
+      --glass-shadow: 0 12px 40px rgba(20, 24, 60, 0.35); /* pinned-specimen drop shadow */
+      --radius: 12px;                          /* modest, not pill, not zero */
+      --radius-sm: 9px;
+      --ok: #8fca7a;                           /* muted field green (status only) */
+      --err: #e88a6a;                          /* muted brick (status only) */
+
+      /* --- Type roles (all offline system stacks — no web-font CDN) --- */
+      /* Condensed grotesque for specimen labels, section titles, buttons. */
+      --font-condensed: "Roboto Condensed", "Arial Narrow", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+      /* Monospace for telemetry, trial numbers, distances, live values. */
+      --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+      /* One walk cycle of the header filmstrip (~170ms × 6 frames). */
+      --gait-dur: 1.02s;
     }
 
     * { box-sizing: border-box; }
@@ -40,7 +63,8 @@
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
 
-    /* The animated pastel/twilight sky. A big gradient we drift slowly. */
+    /* The animated pastel/twilight sky. A big gradient we drift slowly.
+     * (Untouched — the plate floats over it.) */
     body {
       background: linear-gradient(120deg, #8ec5fc 0%, #b7a8ff 22%, #f0a6d8 45%, #ffc6a0 66%, #a0e7ff 88%, #8ec5fc 100%);
       background-size: 320% 320%;
@@ -57,6 +81,12 @@
       body { animation: none; }
     }
 
+    /* Visible keyboard focus everywhere (accessibility floor). Amber ring. */
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
     /* FULLSCREEN, TRANSPARENT simulation canvas — floats over the sky. */
     canvas#sim {
       position: fixed;
@@ -69,8 +99,15 @@
       touch-action: none;
     }
 
-    /* Floating frosted sidebar. On desktop this is the classic top-left card;
-     * env(safe-area-*) resolves to 0 on desktop so positions are unchanged. */
+    /* ------------------------------------------------------------------
+     * THE STUDY PLATE (sidebar). Matte umber fill printed with a faint
+     * blueprint grid (two repeating-linear-gradients at 22px), framed by an
+     * engraved hairline (inset box-shadow) and an inner catalog rule
+     * (negative-offset outline, which is pinned to the box and does NOT
+     * scroll with the content). A subtle backdrop blur — it is a pinned
+     * plate, NOT frosted glass. On desktop this is the top-left corner card;
+     * env(safe-area-*) resolves to 0 on desktop so positions are unchanged.
+     * ------------------------------------------------------------------ */
     #sidebar {
       position: fixed;
       top: calc(16px + env(safe-area-inset-top));
@@ -82,12 +119,21 @@
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
       padding: 16px;
-      background: var(--glass);
+      /* Blueprint grid (vertical + horizontal 1px rules at 22px) over the
+       * umber plate fill. */
+      background:
+        repeating-linear-gradient(90deg, var(--hairline) 0 1px, transparent 1px 22px),
+        repeating-linear-gradient(0deg,  var(--hairline) 0 1px, transparent 1px 22px),
+        var(--glass);
       border: 1px solid var(--glass-border);
       border-radius: var(--radius);
-      backdrop-filter: blur(18px) saturate(1.2);
-      -webkit-backdrop-filter: blur(18px) saturate(1.2);
-      box-shadow: var(--glass-shadow);
+      backdrop-filter: blur(6px) saturate(1.05);
+      -webkit-backdrop-filter: blur(6px) saturate(1.05);
+      /* Soft drop shadow (pinned specimen) + engraved hairline plate frame. */
+      box-shadow: var(--glass-shadow), inset 0 0 0 1px rgba(243, 236, 224, 0.05);
+      /* Inner catalog rule, pinned to the plate edge (does not scroll). */
+      outline: 1px solid var(--hairline);
+      outline-offset: -5px;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -97,39 +143,110 @@
     /* Mobile-only chrome: hidden on desktop, revealed by the media query. */
     #btn-menu { display: none; }
     #drawer-scrim { display: none; }
-    /* Slim glassy scrollbar. */
+    /* Slim plate scrollbar. */
     #sidebar::-webkit-scrollbar { width: 8px; }
     #sidebar::-webkit-scrollbar-thumb {
-      background: rgba(255,255,255,0.25); border-radius: 8px;
+      background: var(--glass-border); border-radius: 8px;
     }
 
+    /* ------------------------------------------------------------------
+     * HEADER SIGNATURE — a Muybridge "gait filmstrip" nameplate.
+     * Six ~26px cells in a row, each a stick-figure silhouette posed one
+     * phase apart across ONE stride cycle (see mode.js for the pose math).
+     * An amber "active" highlight steps left→right at a walking cadence.
+     * ------------------------------------------------------------------ */
+    .gaitstrip {
+      display: flex;
+      gap: 3px;
+      margin: 0 0 2px;
+    }
+    .gaitframe {
+      flex: 0 0 auto;
+      width: 26px;
+      height: 26px;
+      padding: 2px;
+      border: 1px solid var(--hairline);
+      border-radius: 3px;
+      /* Base: dim albumen figure. The animation flips ONE cell to amber. */
+      color: rgba(243, 236, 224, 0.5);
+      background: transparent;
+      animation: gait-cycle var(--gait-dur) infinite;
+    }
+    /* Stagger the six cells so exactly one is "active" at a time, marching
+     * left→right — reading as a single walk cycle, like a Muybridge plate. */
+    .gaitframe:nth-child(1) { animation-delay: calc(var(--gait-dur) * 0 / 6); }
+    .gaitframe:nth-child(2) { animation-delay: calc(var(--gait-dur) * 1 / 6); }
+    .gaitframe:nth-child(3) { animation-delay: calc(var(--gait-dur) * 2 / 6); }
+    .gaitframe:nth-child(4) { animation-delay: calc(var(--gait-dur) * 3 / 6); }
+    .gaitframe:nth-child(5) { animation-delay: calc(var(--gait-dur) * 4 / 6); }
+    .gaitframe:nth-child(6) { animation-delay: calc(var(--gait-dur) * 5 / 6); }
+    @keyframes gait-cycle {
+      /* Active for 1/6 of the cycle (hard on/off — the 0.01% edge is
+       * effectively instant, so no color interpolation smear). */
+      0%, 16.66%   { color: var(--accent); background: var(--amber-wash); }
+      16.67%, 100% { color: rgba(243, 236, 224, 0.5); background: transparent; }
+    }
+    .gaitframe svg { display: block; width: 100%; height: 100%; }
+    .gaitframe svg path {
+      fill: none; stroke: currentColor; stroke-width: 1.4;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .gaitframe svg circle { fill: currentColor; stroke: none; }
+    /* Reduced motion: FREEZE the strip mid-stride (no marching highlight). */
+    @media (prefers-reduced-motion: reduce) {
+      .gaitframe { animation: none; color: rgba(243, 236, 224, 0.5); background: transparent; }
+      .gaitframe:nth-child(4) { color: var(--accent); background: var(--amber-wash); }
+    }
+
+    /* Eyebrow: condensed amber caps + a thin catalog rule + a plate index. */
+    .eyebrow {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-condensed);
+      font-stretch: condensed;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--accent);
+    }
+    .eyebrow .rule { flex: 1 1 auto; height: 1px; background: var(--glass-border); }
+    .eyebrow .plate-idx {
+      flex: 0 0 auto;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em; color: var(--muted); font-weight: 400;
+    }
+
+    /* Wordmark — condensed grotesque, tracked caps; the suffix is amber. */
     #sidebar h1 {
       margin: 0;
-      font-size: 16px;
+      font-family: var(--font-condensed);
+      font-stretch: condensed;
+      font-size: 18px;
       font-weight: 700;
-      letter-spacing: 0.2px;
-      text-shadow: 0 1px 8px rgba(20,24,60,0.35);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text);
     }
     #sidebar h1 span { color: var(--accent); }
     .sub {
-      margin: -6px 0 2px;
-      font-size: 11px;
+      margin: -2px 0 2px;
+      font-size: 12px;
       color: var(--muted);
-      line-height: 1.45;
+      line-height: 1.5;
     }
 
     .row { display: flex; gap: 8px; }
     .section {
       display: flex; flex-direction: column; gap: 10px;
       padding-top: 10px;
-      border-top: 1px solid rgba(255,255,255,0.16);
+      border-top: 1px solid var(--hairline);
     }
     .section-title {
-      font-size: 11px; font-weight: 600; letter-spacing: 0.6px;
+      font-family: var(--font-condensed);
+      font-stretch: condensed;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
       text-transform: uppercase; color: var(--muted);
     }
 
-    /* Glassy controls. */
+    /* Plate controls — specimen-label buttons. */
     button {
       flex: 1 1 0;
       appearance: none;
@@ -139,17 +256,23 @@
       border: 1px solid var(--glass-border);
       border-radius: var(--radius-sm);
       padding: 9px 10px;
-      font-size: 13px;
-      font-weight: 600;
-      box-shadow: 0 4px 14px rgba(20,24,60,0.18);
-      transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+      font-family: var(--font-condensed);
+      font-stretch: condensed;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     }
-    button:hover { background: rgba(255,255,255,0.24); transform: translateY(-1px); }
+    button:hover { background: rgba(247, 240, 230, 0.12); transform: translateY(-1px); }
     button:active { transform: translateY(0); }
-    button.active { background: rgba(143,196,255,0.35); border-color: var(--accent); }
+    button.active {
+      background: var(--amber-wash); border-color: var(--accent); color: var(--accent);
+    }
 
     .icon-btn {
       flex: 0 0 auto; width: 30px; padding: 6px 0; font-size: 13px; line-height: 1;
+      letter-spacing: 0; /* icon glyphs — don't track them apart */
     }
 
     label.toggle, .lane-exploit {
@@ -162,66 +285,98 @@
     .field .label-row {
       display: flex; justify-content: space-between; align-items: baseline; font-size: 13px;
     }
-    .field .label-row .val { color: var(--accent); font-variant-numeric: tabular-nums; }
+    /* Live values read as telemetry: mono, amber, tabular. */
+    .field .label-row .val {
+      font-family: var(--font-mono);
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
     input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
     input[type="text"], input[type="number"] {
       width: 100%;
       color: var(--text);
-      background: rgba(255,255,255,0.10);
+      background: var(--glass-strong);
       border: 1px solid var(--glass-border);
-      border-radius: 10px;
+      border-radius: var(--radius-sm);
       padding: 7px 9px;
       font-size: 13px;
     }
-    input::placeholder { color: rgba(244,247,255,0.5); }
+    /* Numeric fields are measurements — set them in mono, tabular. */
+    input[type="number"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    input::placeholder { color: rgba(243, 236, 224, 0.5); }
 
-    /* Segmented tool picker (radios styled as glass buttons). */
+    /* Segmented tool picker (radios styled as specimen-label buttons). */
     .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
     .segmented label {
-      flex: 1 1 0; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600;
-      padding: 8px 6px; border-radius: 10px;
+      flex: 1 1 0; text-align: center; cursor: pointer;
+      font-family: var(--font-condensed);
+      font-stretch: condensed;
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 8px 6px; border-radius: var(--radius-sm);
       background: var(--glass-strong); border: 1px solid var(--glass-border);
     }
     .segmented input { display: none; }
-    .segmented input:checked + span { color: #0b1024; }
+    .segmented input:checked + span { color: #241f1a; } /* dark text on amber */
     .segmented label:has(input:checked) {
-      background: rgba(143,196,255,0.55); border-color: var(--accent);
+      background: var(--accent); border-color: var(--accent);
     }
 
-    /* Stat card (frosted). */
+    /* Stat card (plate inset). */
     .card {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.16);
-      border-radius: 14px;
+      background: var(--glass-strong);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-sm);
       padding: 10px 12px;
     }
     #hud {
+      font-family: var(--font-mono);
       font-size: 11.5px; color: var(--text);
       font-variant-numeric: tabular-nums; white-space: pre-line; line-height: 1.5;
     }
     #reward-graph {
       width: 100%; height: 66px; display: block;
-      border-radius: 12px; margin-top: 8px;
-      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: var(--radius-sm); margin-top: 8px;
+      border: 1px solid var(--hairline);
     }
 
-    /* Lane + slot lists. */
+    /* Lane + slot lists — each lane is a numbered parallel TRIAL. */
     .lane-row, .slot-row {
       display: flex; align-items: center; gap: 6px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 12px; padding: 6px;
+      background: var(--glass-strong);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-sm); padding: 6px;
     }
-    .lane-row.focused { border-color: var(--accent); background: rgba(143,196,255,0.18); }
+    .lane-row.focused { border-color: var(--accent); background: var(--amber-wash); }
+    /* Zero-padded trial index (mono, amber) — reads as a plate figure number. */
+    .lane-idx {
+      flex: 0 0 auto;
+      font-family: var(--font-mono);
+      font-size: 11px; font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em; color: var(--accent); opacity: 0.8;
+      padding-left: 2px;
+    }
     .lane-name, .slot-name {
       flex: 1 1 auto; text-align: left; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap; padding: 6px 8px; font-weight: 600; font-size: 12.5px;
-      box-shadow: none;
+      white-space: nowrap; padding: 6px 8px; font-weight: 700; font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    /* Best-distance readout — a measurement: mono, muted, trailing "m". */
+    .lane-dist {
+      flex: 0 0 auto;
+      font-family: var(--font-mono);
+      font-size: 11px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
     }
     .lane-exploit { flex: 0 0 auto; gap: 4px; font-size: 11px; }
     .lane-exploit input { width: 14px; height: 14px; }
     .muted-line { font-size: 11.5px; color: var(--muted); padding: 4px 2px; }
+    /* Training throughput readout — telemetry, so set it in mono. */
+    #val-sps {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
 
     #msg { font-size: 11.5px; color: var(--muted); min-height: 15px; line-height: 1.4; }
     #msg[data-kind="ok"]  { color: var(--ok); }
@@ -235,9 +390,10 @@
 
     /* ===================================================================
      * MOBILE / TOUCH. Narrow screens OR a coarse (finger) pointer turn the
-     * floating sidebar into a slide-up bottom sheet with a tappable ☰ button,
-     * so the canvas can be full-screen. Desktop is untouched (this whole block
-     * only applies below the breakpoint / on coarse pointers).
+     * floating plate into a slide-up bottom sheet with a tappable ☰ button,
+     * so the canvas can be full-screen. Desktop is untouched (this whole
+     * block only applies below the breakpoint / on coarse pointers). The
+     * ☰ button + grab-handle are re-tinted to the plate palette via tokens.
      * =================================================================== */
     @media (max-width: 768px), (pointer: coarse) {
       /* Floating toggle button (opens/closes the sheet). */
@@ -248,29 +404,31 @@
         left: calc(12px + env(safe-area-inset-left));
         z-index: 30;
         width: 48px; height: 48px; padding: 0;
-        font-size: 20px; line-height: 1; border-radius: 14px;
+        color: var(--text);
+        font-size: 20px; line-height: 1; border-radius: var(--radius);
         background: var(--glass); border: 1px solid var(--glass-border);
-        backdrop-filter: blur(18px) saturate(1.2);
-        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        backdrop-filter: blur(8px) saturate(1.05);
+        -webkit-backdrop-filter: blur(8px) saturate(1.05);
         box-shadow: var(--glass-shadow);
       }
-      #btn-menu.active { background: rgba(143,196,255,0.35); border-color: var(--accent); }
+      #btn-menu.active { background: var(--amber-wash); border-color: var(--accent); color: var(--accent); }
 
       /* Dimming scrim behind the open sheet; tap it to close. */
       #drawer-scrim {
         display: block; position: fixed; inset: 0; z-index: 15;
-        background: rgba(8,10,30,0.38);
+        background: rgba(18, 12, 8, 0.46);
         opacity: 0; pointer-events: none;
         transition: opacity 0.25s ease;
       }
       #drawer-scrim.open { opacity: 1; pointer-events: auto; }
 
-      /* Sidebar becomes a bottom sheet that slides up when .open. */
+      /* Plate becomes a bottom sheet that slides up when .open. */
       #sidebar {
         top: auto; left: 0; right: 0; bottom: 0;
         width: auto; max-width: 640px; margin: 0 auto;
         max-height: 84vh;
-        border-radius: 22px 22px 0 0;
+        border-radius: 16px 16px 0 0;
+        outline-offset: -6px;
         padding: 10px 16px calc(18px + env(safe-area-inset-bottom));
         padding-left: calc(16px + env(safe-area-inset-left));
         padding-right: calc(16px + env(safe-area-inset-right));
@@ -284,14 +442,14 @@
       #sidebar::before {
         content: ""; flex: 0 0 auto;
         width: 44px; height: 5px; margin: 0 auto 2px;
-        border-radius: 3px; background: rgba(255,255,255,0.4);
+        border-radius: 3px; background: rgba(243, 236, 224, 0.4);
       }
 
       /* Finger-sized tap targets (~44px) and comfortable spacing. */
-      button { min-height: 44px; padding: 11px 12px; font-size: 14px; }
+      button { min-height: 44px; padding: 11px 12px; font-size: 13px; }
       .icon-btn { width: 44px; height: 44px; font-size: 17px; }
       .segmented { gap: 8px; }
-      .segmented label { padding: 12px 6px; font-size: 13px; }
+      .segmented label { padding: 12px 6px; font-size: 12px; }
       input[type="text"], input[type="number"] {
         min-height: 44px; font-size: 16px; padding: 11px 12px; /* 16px avoids iOS focus-zoom */
       }
@@ -299,7 +457,7 @@
       input[type="checkbox"] { width: 22px; height: 22px; }
       .lane-exploit input { width: 20px; height: 20px; }
       .lane-row, .slot-row { padding: 8px; gap: 8px; }
-      .lane-name, .slot-name { font-size: 14px; padding: 11px 8px; }
+      .lane-name, .slot-name { font-size: 13px; padding: 11px 8px; }
       .section { gap: 12px; }
       #reward-graph { height: 76px; }
       .sub { font-size: 12px; }
