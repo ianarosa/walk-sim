@@ -15,6 +15,9 @@
 export const worldConfig = Object.freeze({
   // --- Rendering scale ---------------------------------------------------
   PPM: 60, // pixels per meter. A 1m torso => 60px tall on screen.
+  maxDpr: 2, // cap on devicePixelRatio: bounds the canvas backing-store pixel
+  // count on hi-DPI screens (retina/4K report 2–3, quadrupling+ fill-rate).
+  // Higher => crisper text on retina; lower => more perf (fewer pixels to fill).
 
   // --- Physics world -----------------------------------------------------
   // gravity is intentionally a plain (unfrozen) object literal, preserved from

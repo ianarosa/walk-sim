@@ -81,7 +81,10 @@ mountPanels(appctx);
  * and propagate the new size to the lane grid and the editor.
  */
 function resize() {
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // Clamp DPR to CONFIG.maxDpr: hi-DPI screens report 2–3, which would quad-to-
+  // 9x the backing-store pixel count (and per-frame fill cost of every lane's
+  // parallax backdrop) for near-zero visual gain. Floor at 1 so it never shrinks.
+  const dpr = Math.max(1, Math.min(CONFIG.maxDpr || 2, window.devicePixelRatio || 1));
   viewW = window.innerWidth;
   viewH = window.innerHeight;
   canvas.width = Math.round(viewW * dpr);
