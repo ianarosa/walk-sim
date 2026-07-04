@@ -279,28 +279,35 @@ function drawClouds(ctx, camera, C) {
  * offset comes from hash01 so clouds vary but never flicker.
  */
 function cumulusLobes(i, cx, cy, w, h) {
-  const hw = w / 2;
-  const by = cy + h * 0.3; // common flatter BASELINE (lobe bottoms rest near here)
+  const by = cy + h * 0.3; // flat BASELINE — lobe bottoms rest near here
+  const rBase = h * 0.52; // base lobe radius ~ half the cloud height
   const lobes = [];
 
-  // Baseline lobes: bottoms ~ on `by` (flat bottom), radii bulge the top.
-  const nBase = 3 + Math.round(hash01(i, 45) * 2); // 3..5 baseline lobes
-  for (let k = 0; k < nBase; k++) {
-    const t = nBase <= 1 ? 0.5 : k / (nBase - 1); // 0..1 across the width
-    const bell = 1 - Math.abs(t - 0.5) * 0.9; // ~0.55 (edge) .. 1 (center)
-    const r = h * lerp(0.3, 0.46, hash01(i, 50 + k)) * lerp(0.78, 1.0, bell);
-    const x = cx + lerp(-hw * 0.8, hw * 0.8, t) + (hash01(i, 60 + k) - 0.5) * h * 0.18;
-    const y = by - r * lerp(0.82, 0.96, hash01(i, 70 + k)); // bottom near the baseline
+  // Baseline lobes. The KEY fix vs the old layout: the lobe STEP is SMALLER than
+  // the radius, so adjacent lobes overlap heavily and fuse into ONE fluffy mass
+  // (the old version spread them ~a full width apart with small radii, so they
+  // read as separate coins). Fit an integer number of lobes evenly across w.
+  let n = Math.round(w / (rBase * 0.8));
+  n = Math.max(3, Math.min(7, n));
+  const step = w / n;
+  const x0 = cx - w / 2 + step / 2;
+  const nBase = n;
+  for (let k = 0; k < n; k++) {
+    const t = n <= 1 ? 0.5 : k / (n - 1); // 0..1 across the width
+    const bell = 1 - Math.abs(t - 0.5) * 0.55; // center lobes a bit bigger
+    const r = rBase * lerp(0.9, 1.05, hash01(i, 50 + k)) * lerp(0.82, 1.0, bell);
+    const x = x0 + k * step + (hash01(i, 60 + k) - 0.5) * step * 0.35;
+    const y = by - r + (hash01(i, 70 + k) - 0.5) * h * 0.06; // bottom ~ on the baseline (flat)
     lobes.push({ x, y, r });
   }
 
-  // 1–2 top bump lobes for the bumpy crown: inner, higher, a touch smaller.
-  const nTop = 1 + Math.round(hash01(i, 46)); // 1..2 bumps
+  // 2–3 top bump lobes (inner, higher) for the bumpy crown.
+  const nTop = 2 + Math.round(hash01(i, 46)); // 2..3 bumps
   for (let k = 0; k < nTop; k++) {
-    const t = lerp(0.3, 0.7, hash01(i, 80 + k));
-    const r = h * lerp(0.26, 0.38, hash01(i, 85 + k));
-    const x = cx + lerp(-hw * 0.45, hw * 0.45, t);
-    const y = by - h * lerp(0.55, 0.78, hash01(i, 90 + k)) - r * 0.2; // up near the crown
+    const t = lerp(0.28, 0.72, hash01(i, 80 + k));
+    const r = rBase * lerp(0.72, 0.95, hash01(i, 85 + k));
+    const x = cx + (t - 0.5) * w * 0.62;
+    const y = by - r - h * lerp(0.3, 0.55, hash01(i, 90 + k)); // up near the crown
     lobes.push({ x, y, r });
   }
 
