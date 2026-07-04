@@ -23,8 +23,8 @@
  * ART DIRECTION (why it reads as designed, not AI clip-art): flat fills (no soft
  * radial blobs), a MUTED limited palette, and per-element VARIETY driven by a
  * deterministic hash — varied heights, widths, tilt, form and spacing jitter so
- * no two elements are identical. Clouds are sparse soft stratus (a few flat
- * overlapping lobes, not tall puffy cumulus), trees are irregular two-form
+ * no two elements are identical. Clouds are sparse BOLD puffy cartoon cumulus
+ * with a clean dark outline (comic/sticker style), trees are irregular two-form
  * silhouettes (broadleaf + layered fir) in two depth rows, hills are overlapping
  * tonal bands (not repeated mounds).
  *
@@ -109,7 +109,7 @@ export function drawParallax(ctx, camera) {
   const S = CONFIG.scenery;
   drawSun(ctx, camera, S.sun); // furthest of all — behind the hills
   drawHills(ctx, camera, S.hills); // overlapping tonal bands
-  drawClouds(ctx, camera, S.clouds); // sparse flat streaks
+  drawClouds(ctx, camera, S.clouds); // sparse bold puffy outlined cumulus
   drawTrees(ctx, camera, S.trees); // two irregular depth rows
   drawBushes(ctx, camera, S.bushes); // low flat clumps
 }
@@ -197,14 +197,22 @@ function drawHills(ctx, camera, H) {
 }
 
 /**
- * CLOUDS — SPARSE, flat SOFT STRATUS. Each cloud is composed of a few (3–5)
- * overlapping flat rounded LOBES of varying radius, arranged along a gentle
- * horizontal axis (lobe count/sizes/offsets all hashed per cloud, deterministic).
- * All lobes go into ONE path filled ONCE, so overlaps UNION at a single alpha —
- * flat and low-contrast, never darkening where lobes meet, and with no concave
- * "beak" notch. A soft top/bottom alpha fade feathers it into the sky, so it
- * reads as a low soft cloud — NOT a capsule and NOT tall puffy cumulus. Overall
- * length/thickness vary per tile, and a sparsity gate keeps the sky calm+open.
+ * CLOUDS — BOLD PUFFY CARTOON CUMULUS with a clean dark OUTER OUTLINE (comic /
+ * sticker style). Each cloud is several overlapping CIRCLE lobes (see
+ * cumulusLobes): a bumpy rounded multi-lobe top over a flatter bottom.
+ *
+ * The outline is the key to the look, and we get it WITHOUT stroking any circle
+ * (which would leave messy internal arcs). Instead we use the INFLATED-SILHOUETTE
+ * technique, TWO union fills per cloud:
+ *   Pass 1 (outline): fill every lobe circle at radius (r + outlineW) — unioned
+ *     in ONE path — with the dark slate color. This is a single blob slightly
+ *     larger than the cloud.
+ *   Pass 2 (body): fill every lobe circle at radius r — unioned in ONE path —
+ *     with white. The white covers the interior, so the dark shows ONLY as a
+ *     crisp band around the whole outer silhouette. No internal seams.
+ * Each union is one path filled once, so overlapping lobes never double-darken.
+ * A couple of SHORT, faint interior arcs then hint at lobe seams near the top.
+ * A sparsity gate keeps these bold clouds from tiling densely.
  */
 function drawClouds(ctx, camera, C) {
   const oy = camera.offsetY || 0;
@@ -214,43 +222,89 @@ function drawClouds(ctx, camera, C) {
 
   ctx.save();
   for (let i = first; i <= last; i++) {
-    if (hash01(i, 40) > C.density) continue; // sparse: keep the sky open
+    if (hash01(i, 40) > C.density) continue; // sparse: a bold cloud shouldn't tile densely
     const jitter = (hash01(i, 41) - 0.5) * 2 * C.jitter;
     const wx = i * C.spacing + jitter;
     const cx = layerScreenX(camera, wx, C.factor);
-    const cy = bandTop + hash01(i, 42) * bandH; // stable vertical spot in the band
-    const w = lerp(C.minW, C.maxW, hash01(i, 43)) * camera.ppm; // overall length, px
-    const h = lerp(C.minH, C.maxH, hash01(i, 44)) * camera.ppm; // overall thickness, px
+    const cy = bandTop + hash01(i, 42) * bandH; // stable vertical anchor in the band
+    const w = lerp(C.minW, C.maxW, hash01(i, 43)) * camera.ppm; // overall width, px
+    const h = lerp(C.minH, C.maxH, hash01(i, 44)) * camera.ppm; // overall height, px
+    const outlineW = h * C.outlineFrac; // dark band thickness, px (scales with size)
 
-    // Soft top/bottom fade so the flat cloud feathers into the sky (no hard rim).
-    // Widen the fade span a touch past the thickest lobe so caps stay soft too.
-    const grad = ctx.createLinearGradient(0, cy - h * 0.9, 0, cy + h * 0.9);
-    grad.addColorStop(0, C.edgeColor);
-    grad.addColorStop(0.5, C.color);
-    grad.addColorStop(1, C.edgeColor);
-    ctx.fillStyle = grad;
+    // Build this cloud's cumulus lobes (deterministic per tile).
+    const { lobes, nBase } = cumulusLobes(i, cx, cy, w, h);
 
-    // How many overlapping lobes make up THIS cloud (deterministic per tile).
-    const lobes = Math.round(lerp(C.lobeMin, C.lobeMax, hash01(i, 45)));
-    const rEnd = h * 0.7; // keep lobe centers inside the length so ends round off
-    const left = cx - w / 2 + rEnd;
-    const right = cx + w / 2 - rEnd;
-
-    // Build every lobe into ONE path, then fill once (union at a single alpha).
+    // PASS 1 — OUTLINE: union every (r+outlineW) circle in ONE path, fill once,
+    // so a single clean dark blob sits slightly larger than the cloud (no seams).
+    ctx.fillStyle = C.outlineColor;
     ctx.beginPath();
-    for (let L = 0; L < lobes; L++) {
-      // Evenly place centers along the axis, then nudge each with a hashed offset.
-      const t = lobes <= 1 ? 0.5 : L / (lobes - 1);
-      const lx = lerp(left, right, t) + (hash01(i, 50 + L) - 0.5) * rEnd * 0.6;
-      const rx = h * lerp(0.6, 1.1, hash01(i, 60 + L)); // lobe half-width (wider than tall)
-      const ry = (h / 2) * lerp(0.72, 1.0, hash01(i, 70 + L)); // lobe half-height (flat)
-      const ly = cy + (hash01(i, 80 + L) - 0.5) * h * 0.3; // gentle top/bottom variance
-      ctx.moveTo(lx + rx, ly); // start each lobe fresh so no chord links them
-      ctx.ellipse(lx, ly, rx, ry, 0, 0, Math.PI * 2);
+    for (const L of lobes) {
+      ctx.moveTo(L.x + L.r + outlineW, L.y); // fresh subpath (no chord between lobes)
+      ctx.arc(L.x, L.y, L.r + outlineW, 0, Math.PI * 2);
     }
     ctx.fill();
+
+    // PASS 2 — BODY: union every r circle in ONE path, fill white once. The white
+    // covers the interior, leaving the dark showing ONLY as a crisp outer band.
+    ctx.fillStyle = C.bodyColor;
+    ctx.beginPath();
+    for (const L of lobes) {
+      ctx.moveTo(L.x + L.r, L.y);
+      ctx.arc(L.x, L.y, L.r, 0, Math.PI * 2);
+    }
+    ctx.fill();
+
+    // A couple of SHORT, faint interior arcs on the lobes flanking center — a
+    // subtle hint of lobe seams near the top, kept few + faint so it stays clean.
+    ctx.strokeStyle = C.accentColor;
+    ctx.lineWidth = Math.max(1, outlineW * 0.55);
+    const mid = Math.floor(nBase / 2);
+    for (const k of [mid - 1, mid + 1]) {
+      if (k < 0 || k >= nBase) continue;
+      const L = lobes[k];
+      ctx.beginPath();
+      ctx.arc(L.x, L.y, L.r * 0.86, Math.PI * 1.15, Math.PI * 1.85); // short top cap
+      ctx.stroke();
+    }
   }
   ctx.restore();
+}
+
+/**
+ * cumulusLobes(i, cx, cy, w, h) — the deterministic lobe layout for one cumulus.
+ * Returns { lobes:[{x,y,r}], nBase }. BASELINE lobes span the width with their
+ * BOTTOMS aligned near a common baseline (flat bottom) while their radii bulge
+ * the top; central lobes are bigger, flanks smaller (a cumulus "bell"). Then 1–2
+ * TOP BUMP lobes, inner and biased higher, give the bumpy crown. Every size and
+ * offset comes from hash01 so clouds vary but never flicker.
+ */
+function cumulusLobes(i, cx, cy, w, h) {
+  const hw = w / 2;
+  const by = cy + h * 0.3; // common flatter BASELINE (lobe bottoms rest near here)
+  const lobes = [];
+
+  // Baseline lobes: bottoms ~ on `by` (flat bottom), radii bulge the top.
+  const nBase = 3 + Math.round(hash01(i, 45) * 2); // 3..5 baseline lobes
+  for (let k = 0; k < nBase; k++) {
+    const t = nBase <= 1 ? 0.5 : k / (nBase - 1); // 0..1 across the width
+    const bell = 1 - Math.abs(t - 0.5) * 0.9; // ~0.55 (edge) .. 1 (center)
+    const r = h * lerp(0.3, 0.46, hash01(i, 50 + k)) * lerp(0.78, 1.0, bell);
+    const x = cx + lerp(-hw * 0.8, hw * 0.8, t) + (hash01(i, 60 + k) - 0.5) * h * 0.18;
+    const y = by - r * lerp(0.82, 0.96, hash01(i, 70 + k)); // bottom near the baseline
+    lobes.push({ x, y, r });
+  }
+
+  // 1–2 top bump lobes for the bumpy crown: inner, higher, a touch smaller.
+  const nTop = 1 + Math.round(hash01(i, 46)); // 1..2 bumps
+  for (let k = 0; k < nTop; k++) {
+    const t = lerp(0.3, 0.7, hash01(i, 80 + k));
+    const r = h * lerp(0.26, 0.38, hash01(i, 85 + k));
+    const x = cx + lerp(-hw * 0.45, hw * 0.45, t);
+    const y = by - h * lerp(0.55, 0.78, hash01(i, 90 + k)) - r * 0.2; // up near the crown
+    lobes.push({ x, y, r });
+  }
+
+  return { lobes, nBase };
 }
 
 /**

@@ -86,25 +86,26 @@ export const sceneryConfig = Object.freeze({
       ],
     }),
 
-    // CLOUDS: sparse, flat, SOFT STRATUS — each cloud is a few overlapping flat
-    // rounded lobes of varying radius along a gentle horizontal axis, with a soft
-    // top+bottom alpha fade so it feathers into the sky. Reads as a low soft
-    // cloud — NOT a capsule, NOT tall puffy cumulus, no concave "beak" notches.
+    // CLOUDS: sparse, BOLD PUFFY CARTOON CUMULUS (comic/sticker style). Each
+    // cloud is several overlapping CIRCLE lobes — a bumpy rounded multi-lobe top
+    // over a flatter bottom — wrapped in ONE clean dark outer OUTLINE (drawn by
+    // the inflated-silhouette two-pass technique in src/scenery.js). White body,
+    // slate outline. Bumpy tops/sizes are hashed per cloud so no two match.
     clouds: Object.freeze({
       factor: 0.08, // furthest-feeling drift (sky)
       spacing: 11.0, // meters between candidate cloud slots
       jitter: 3.0, // ± meters stable jitter
-      density: 0.62, // fraction of slots that get a cloud (calm but not lonely)
+      density: 0.5, // fraction of slots that get a cloud (bold => keep it sparse)
       topFrac: 0.1, // cloud band starts this fraction down the cell
-      bandFrac: 0.32, // …and spans this fraction of the cell height (vertical spread)
-      minW: 2.6, // overall cloud length range, meters (elongated)
+      bandFrac: 0.28, // …and spans this fraction of the cell height (vertical spread)
+      minW: 2.6, // overall cloud width range, meters
       maxW: 5.6,
-      minH: 0.34, // overall cloud thickness range, meters (thin, flat, low)
-      maxH: 0.62,
-      lobeMin: 3, // fewest overlapping lobes per cloud
-      lobeMax: 5, // most overlapping lobes per cloud
-      color: 'rgba(248,246,240,0.7)', // soft warm-white core (flat, ~0.7)
-      edgeColor: 'rgba(248,246,240,0)', // transparent top/bottom fade
+      minH: 1.2, // overall cloud height range, meters (puffy, taller than stratus)
+      maxH: 1.9,
+      outlineFrac: 0.06, // outline band thickness as a fraction of cloud height
+      bodyColor: 'rgba(250,250,252,0.96)', // near-opaque white cloud body
+      outlineColor: 'rgba(38,44,58,0.9)', // bold dark slate/navy outer outline
+      accentColor: 'rgba(38,44,58,0.22)', // faint interior seam hints near the top
     }),
 
     // TREES: two irregular depth ROWS of varied two-form silhouettes — a rounded
