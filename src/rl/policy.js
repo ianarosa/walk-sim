@@ -139,6 +139,27 @@ export class GaussianPolicy {
     return [...this.mlp.parameters(), { w: this.logStd, g: this.gLogStd }];
   }
 
+  /**
+   * gradNormSq() — ‖g‖² over ALL of the actor's accumulated gradients: the
+   * MLP's gW/gB PLUS the logStd grad vector. Mirrors ValueNet.gradNormSq so the
+   * trainer can compute a combined actor+critic global grad norm. A pure read.
+   */
+  gradNormSq() {
+    let s = this.mlp.gradNormSq();
+    for (let i = 0; i < this.actSize; i++) s += this.gLogStd[i] * this.gLogStd[i];
+    return s;
+  }
+
+  /**
+   * scaleGrads(factor) — multiply EVERY actor gradient (MLP gW/gB and the
+   * logStd grad) by `factor` in place, for global grad-norm clipping. factor=1
+   * is a no-op.
+   */
+  scaleGrads(factor) {
+    this.mlp.scaleGrads(factor);
+    for (let i = 0; i < this.actSize; i++) this.gLogStd[i] *= factor;
+  }
+
   /** Optimizer step, then clamp logStd into its safe range. */
   applyGrads(adam) {
     adam.update(this.parameters());

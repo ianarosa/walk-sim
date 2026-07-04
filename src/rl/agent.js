@@ -54,6 +54,7 @@ export const RL_DEFAULTS = Object.freeze({
   speedScale: 0.1,
   entCoef: 0.0,
   vfCoef: 0.5,
+  maxGradNorm: 0.5, // global L2 grad-norm clip (0/non-finite = disabled, un-clipped path)
   initLogStd: -0.5,
   returnHistoryCap: 300,
 });
@@ -280,6 +281,25 @@ export class Trainer {
           const V = this.value.forward(obs);
           const dV = cfg.vfCoef * (V - ret[i]) * invCount;
           this.value.backward(dV);
+        }
+
+        // --- Global grad-norm clipping (config-gated, fully REVERSIBLE) ---
+        // Standard PPO stabilizer: cap the L2 norm of the COMBINED actor+critic
+        // gradient across ALL params before Adam steps, so one freak minibatch
+        // can't blow up the weights. It only RESCALES the already-accumulated
+        // gradient — the reward/objective is untouched. Contract: maxGradNorm<=0
+        // (or non-finite) skips this block entirely, reproducing the un-clipped
+        // path byte-for-byte; and even when enabled, a gradient already within
+        // the cap is left exactly as-is (no scaling). Kept identical to trainer-core.js.
+        if (cfg.maxGradNorm > 0) {
+          const gnorm = Math.sqrt(
+            this.policy.gradNormSq() + this.value.gradNormSq()
+          );
+          if (gnorm > cfg.maxGradNorm) {
+            const scale = cfg.maxGradNorm / (gnorm + 1e-6);
+            this.policy.scaleGrads(scale);
+            this.value.scaleGrads(scale);
+          }
         }
 
         // One optimizer step per minibatch (grads zero themselves inside).

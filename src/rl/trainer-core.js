@@ -309,6 +309,25 @@ export class ParallelTrainer {
           this.value.backward(dV);
         }
 
+        // --- Global grad-norm clipping (config-gated, fully REVERSIBLE) ---
+        // Standard PPO stabilizer: cap the L2 norm of the COMBINED actor+critic
+        // gradient across ALL params before Adam steps, so one freak minibatch
+        // can't blow up the weights. It only RESCALES the already-accumulated
+        // gradient — the reward/objective is untouched. Contract: maxGradNorm<=0
+        // (or non-finite) skips this block entirely, reproducing the un-clipped
+        // path byte-for-byte; and even when enabled, a gradient already within
+        // the cap is left exactly as-is (no scaling). Kept identical to agent.js.
+        if (cfg.maxGradNorm > 0) {
+          const gnorm = Math.sqrt(
+            this.policy.gradNormSq() + this.value.gradNormSq()
+          );
+          if (gnorm > cfg.maxGradNorm) {
+            const scale = cfg.maxGradNorm / (gnorm + 1e-6);
+            this.policy.scaleGrads(scale);
+            this.value.scaleGrads(scale);
+          }
+        }
+
         this.policy.applyGrads(this.adamPolicy);
         this.value.applyGrads(this.adamValue);
       }

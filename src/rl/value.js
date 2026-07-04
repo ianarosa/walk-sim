@@ -43,6 +43,16 @@ export class ValueNet {
     adam.update(this.parameters());
   }
 
+  /** gradNormSq() — ‖g‖² over the critic's accumulated grads. A pure read. */
+  gradNormSq() {
+    return this.mlp.gradNormSq();
+  }
+
+  /** scaleGrads(factor) — scale every critic grad in place (grad-norm clip). */
+  scaleGrads(factor) {
+    this.mlp.scaleGrads(factor);
+  }
+
   serialize() {
     return { obsSize: this.obsSize, mlp: this.mlp.serialize() };
   }

@@ -170,6 +170,33 @@ export class MLP {
     adam.update(this.parameters());
   }
 
+  /**
+   * gradNormSq() — sum of squares of EVERY accumulated gradient (all layers'
+   * gW and gB). Returns ‖g‖² so callers can combine multiple nets' grad norms
+   * before a single sqrt. Used by the trainer's global grad-norm clipping; a
+   * pure read (does not touch the accumulators).
+   */
+  gradNormSq() {
+    let s = 0;
+    for (const L of this.layers) {
+      for (let i = 0; i < L.gW.length; i++) s += L.gW[i] * L.gW[i];
+      for (let o = 0; o < L.gB.length; o++) s += L.gB[o] * L.gB[o];
+    }
+    return s;
+  }
+
+  /**
+   * scaleGrads(factor) — multiply every accumulated gradient (all gW/gB) by
+   * `factor` IN PLACE, before the optimizer consumes them. This is how global
+   * grad-norm clipping rescales the update; passing factor=1 is a no-op.
+   */
+  scaleGrads(factor) {
+    for (const L of this.layers) {
+      for (let i = 0; i < L.gW.length; i++) L.gW[i] *= factor;
+      for (let o = 0; o < L.gB.length; o++) L.gB[o] *= factor;
+    }
+  }
+
   serialize() {
     return {
       sizes: this.sizes.slice(),

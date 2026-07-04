@@ -21,6 +21,12 @@ export const rlConfig = Object.freeze({
     horizon: 2048, // transitions collected before each PPO update
     entCoef: 0.0, // entropy bonus coefficient (0 = off)
     vfCoef: 0.5, // value-loss weight
+    // GLOBAL L2 grad-norm clip applied to BOTH actor and critic together, right
+    // before each Adam step (the standard PPO stabilizer against rare exploding
+    // updates). It only RESCALES the accumulated gradient — the reward/objective
+    // is untouched. 0 (or any non-finite value) DISABLES clipping and reproduces
+    // the un-clipped path byte-for-byte. 0.5 is the canonical PPO default.
+    maxGradNorm: 0.5,
     initLogStd: -1.0, // initial per-action log-std (was -0.5). Tighter exploration
     // keeps the GREEDY/deterministic gait (what Exploit + live preview render)
     // close to the sampled behavior, so the mean policy reliably walks forward
