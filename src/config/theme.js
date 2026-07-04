@@ -12,8 +12,8 @@ export const themeConfig = Object.freeze({
     cellBorder: 'rgba(74,62,48,0.16)', // hairline sepia cell edge
     cellRadius: 18, // rounded corners for a lane cell, px
     focusBorder: 'rgba(143,211,255,0.85)', // focused-lane accent edge
-    groundBand: 'rgba(74,62,48,0.12)', // matte studio-floor fill (warm sepia)
-    groundEdge: 'rgba(74,62,48,0.40)', // sepia ground line (the calibrated floor)
+    groundBand: 'rgba(96,104,68,0.16)', // matte earthy grass-green field fill
+    groundEdge: 'rgba(84,92,58,0.42)', // muted green-brown ground line
     root: '#8fd3ff', // torso / root body
     foot: '#ffd98a', // feet
     limb: '#e7ecff', // other limbs
