@@ -9,7 +9,7 @@
      * ANIMAL LOCOMOTION — GAIT TRIALS.
      * The sidebar is styled as a biomechanics study plate: an Eadweard
      * Muybridge motion-study plate crossed with a field logbook. It is a
-     * matte umber "plate" pinned over the app's slowly animated pastel sky,
+     * matte umber "plate" pinned over the app's static field-daylight sky,
      * printed with a faint blueprint grid, framed by an engraved hairline,
      * and set in a deliberate type pairing — a CONDENSED grotesque for
      * specimen labels + buttons, and a MONOSPACE for telemetry / numbers.
@@ -63,22 +63,17 @@
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
 
-    /* The animated pastel/twilight sky. A big gradient we drift slowly.
-     * (Untouched — the plate floats over it.) */
+    /* STATIC "field-trial daylight" sky. A calm vertical daylight gradient:
+     * a dusty muted blue high up softening to a warm pale-straw haze at the
+     * horizon, with a soft sun-warmed glow rising from the bottom-center (it
+     * ties to the warm cream sun the canvas draws). No animation — this is a
+     * study-plate backdrop, not a drifting pastel gradient. Kept mid-light so
+     * the translucent green hills/trees/bushes and cream sun still read over
+     * it. (The plate + transparent canvas float on top; both untouched.) */
     body {
-      background: linear-gradient(120deg, #8ec5fc 0%, #b7a8ff 22%, #f0a6d8 45%, #ffc6a0 66%, #a0e7ff 88%, #8ec5fc 100%);
-      background-size: 320% 320%;
-      animation: sky 34s ease-in-out infinite;
-    }
-    @keyframes sky {
-      0%   { background-position: 0% 50%; }
-      25%  { background-position: 55% 35%; }
-      50%  { background-position: 100% 60%; }
-      75%  { background-position: 45% 80%; }
-      100% { background-position: 0% 50%; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      body { animation: none; }
+      background:
+        radial-gradient(130% 80% at 50% 100%, rgba(232, 216, 186, 0.85) 0%, rgba(232, 216, 186, 0) 55%),
+        linear-gradient(180deg, #93a6bd 0%, #b9c0c7 55%, #d8ccba 100%);
     }
 
     /* Visible keyboard focus everywhere (accessibility floor). Amber ring. */
