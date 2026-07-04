@@ -134,6 +134,17 @@ registerPanel({
     // ---- Preset picker → "+ Add" a new lane ----
     // Fill the <select> from PRESETS (emoji + name label, id as the value). The
     // default selection is the FIRST preset, so a plain "+ Add" click adds it.
+    // Resolve whichever preset the <select> currently points at.
+    const currentPreset = () => {
+      const id = selectPreset ? selectPreset.value : PRESETS[0].id;
+      return PRESETS.find((p) => p.id === id) || PRESETS[0];
+    };
+    // The button names the chosen preset ("+ Add Worm") so it's obvious the
+    // picker only chooses WHAT the Add button spawns — the dropdown alone does
+    // nothing until you Add.
+    const syncAddLabel = () => {
+      if (btnAddLane) btnAddLane.textContent = `+ Add ${currentPreset().name}`;
+    };
     if (selectPreset) {
       selectPreset.innerHTML = '';
       for (const preset of PRESETS) {
@@ -142,14 +153,17 @@ registerPanel({
         opt.textContent = `${preset.emoji} ${preset.name}`;
         selectPreset.appendChild(opt);
       }
+      selectPreset.addEventListener('change', syncAddLabel);
     }
+    syncAddLabel();
     if (btnAddLane)
       btnAddLane.addEventListener('click', () => {
-        // Resolve the chosen preset (fall back to the first if the select is
-        // missing or somehow unmatched), build a fresh creature and add it.
-        const id = selectPreset ? selectPreset.value : PRESETS[0].id;
-        const preset = PRESETS.find((p) => p.id === id) || PRESETS[0];
-        ctx.addLane(preset.make(), { name: preset.name });
+        // Build a fresh creature of the chosen preset, add it as a new lane, and
+        // FOCUS it so the view immediately switches to the creature you picked
+        // (addLane only auto-focuses when nothing is focused yet).
+        const preset = currentPreset();
+        const res = ctx.addLane(preset.make(), { name: preset.name });
+        if (res && res.lane) ctx.lanes.focus(res.lane.id);
         ctx.refresh();
       });
 

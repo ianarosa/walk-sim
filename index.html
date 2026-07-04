@@ -270,6 +270,28 @@
       letter-spacing: 0; /* icon glyphs — don't track them apart */
     }
 
+    /* Dropdowns (preset pickers) — themed like the specimen-label buttons, with a
+       custom caret so the native WHITE select box doesn't clash with the plate. */
+    select {
+      flex: 1 1 0;
+      appearance: none; -webkit-appearance: none;
+      cursor: pointer;
+      color: var(--text);
+      background-color: var(--glass-strong);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      padding: 9px 26px 9px 10px;
+      font-family: var(--font-condensed); font-stretch: condensed;
+      font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      /* Custom caret (the native arrow is hidden by appearance:none). */
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'><path d='M1 1l4 4 4-4' fill='none' stroke='%23b3afa4' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+      background-repeat: no-repeat; background-position: right 10px center;
+    }
+    select:hover { background-color: rgba(247, 240, 230, 0.12); border-color: var(--accent); }
+    /* The option POPUP is engine-rendered; give it explicit dark-on-dark so
+       Firefox (which honors these) matches the plate and stays readable. */
+    select option { background: #2a241f; color: var(--text); }
+
     label.toggle, .lane-exploit {
       display: flex; align-items: center; justify-content: space-between;
       gap: 8px; font-size: 13px; color: var(--text);
@@ -448,6 +470,7 @@
       input[type="text"], input[type="number"] {
         min-height: 44px; font-size: 16px; padding: 11px 12px; /* 16px avoids iOS focus-zoom */
       }
+      select { min-height: 44px; font-size: 13px; }
       input[type="range"] { height: 34px; }
       input[type="checkbox"] { width: 22px; height: 22px; }
       .lane-exploit input { width: 20px; height: 20px; }
