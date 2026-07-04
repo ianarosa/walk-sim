@@ -5,8 +5,8 @@
  * the speed (control-steps-per-frame), and the live list of lanes (focus /
  * exploit / reset / remove).
  *
- * IDs owned: btn-train-all, btn-add-lane, slider-speed, val-speed,
- *            slider-instances, val-instances, val-sps, lane-list.
+ * IDs owned: btn-train-all, select-preset, btn-add-lane, slider-speed,
+ *            val-speed, slider-instances, val-instances, val-sps, lane-list.
  * Calls into: ctx.loop, ctx.lanes, ctx.addLane, ctx.setMsg, ctx.refresh.
  *
  * Phase 2: training runs in a background Worker PER LANE (see app/worker-lane.js),
@@ -18,7 +18,11 @@
 
 import { registerPanel } from '../registry.js';
 import { CONFIG } from '../../config.js';
-import { defaultBiped } from '../../creature.js';
+// PRESETS drives the "add lane" picker — one entry per ready-made creature
+// (biped, quadruped, worm…). Each has { id, name, emoji, make() } where make()
+// returns a fresh, validated creature. Adding a preset is all we need here, so
+// the old single-shape defaultBiped import is gone.
+import { PRESETS } from '../../creature.js';
 
 registerPanel({
   id: 'train',
@@ -31,7 +35,13 @@ registerPanel({
       <div class="section" style="border-top:none; padding-top:0;">
         <div class="row">
           <button id="btn-train-all" type="button">Pause all</button>
-          <button id="btn-add-lane" type="button">+ Add biped</button>
+        </div>
+        <!-- Preset picker: choose a ready-made creature shape, then "+ Add" it as
+             a new training lane. The <select> is populated from PRESETS in JS so
+             new presets appear automatically. -->
+        <div class="row">
+          <select id="select-preset" title="Creature preset to add"></select>
+          <button id="btn-add-lane" type="button">+ Add</button>
         </div>
         <div class="field">
           <div class="label-row">
@@ -58,6 +68,7 @@ registerPanel({
     container.appendChild(root);
 
     const btnTrainAll = document.getElementById('btn-train-all');
+    const selectPreset = document.getElementById('select-preset');
     const btnAddLane = document.getElementById('btn-add-lane');
     const slider = document.getElementById('slider-speed');
     const valSpeed = document.getElementById('val-speed');
@@ -120,8 +131,27 @@ registerPanel({
       });
     }
 
+    // ---- Preset picker → "+ Add" a new lane ----
+    // Fill the <select> from PRESETS (emoji + name label, id as the value). The
+    // default selection is the FIRST preset, so a plain "+ Add" click adds it.
+    if (selectPreset) {
+      selectPreset.innerHTML = '';
+      for (const preset of PRESETS) {
+        const opt = document.createElement('option');
+        opt.value = preset.id;
+        opt.textContent = `${preset.emoji} ${preset.name}`;
+        selectPreset.appendChild(opt);
+      }
+    }
     if (btnAddLane)
-      btnAddLane.addEventListener('click', () => ctx.addLane(defaultBiped()));
+      btnAddLane.addEventListener('click', () => {
+        // Resolve the chosen preset (fall back to the first if the select is
+        // missing or somehow unmatched), build a fresh creature and add it.
+        const id = selectPreset ? selectPreset.value : PRESETS[0].id;
+        const preset = PRESETS.find((p) => p.id === id) || PRESETS[0];
+        ctx.addLane(preset.make(), { name: preset.name });
+        ctx.refresh();
+      });
 
     if (slider) {
       slider.min = '1';

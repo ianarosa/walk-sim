@@ -183,6 +183,45 @@ export function defaultBiped() {
   const left = leg(-1);
   const right = leg(1);
 
+  // A BLOCKY grid approximation of the biped so it can also be opened in the
+  // grid editor. This is purely editor round-trip METADATA — the physics build
+  // ignores editorGrid entirely, so it does NOT touch the tuned bodies/joints
+  // above. Editing on the grid then converts the biped into fused unit blocks
+  // (a rougher silhouette), which is expected and fine.
+  //
+  // Grid picture (cx to the right, cy up; each cell ~0.34m):
+  //
+  //         (0,4)                 root cell (torso top)
+  //   (-1,3)(0,3)(1,3)            torso/hip row  ── all fuse into one body
+  //   (-1,2)      (1,2)           thighs   (hip joints below the torso row)
+  //   (-1,1)      (1,1)           shins    (knee joints)
+  //   (-1,0)      (1,0)           feet     (ankle joints) — isFoot
+  //
+  // Legs sit at cx=±1 (a gap at cx=0) so left/right never 4-fuse; each leg cell
+  // is split from its neighbours by a joint, giving thigh/shin/foot bodies.
+  const bipedGrid = {
+    cellSize: 0.34,
+    cells: [
+      [0, 4],
+      [-1, 3], [0, 3], [1, 3],
+      [-1, 2], [-1, 1], [-1, 0],
+      [1, 2], [1, 1], [1, 0],
+    ],
+    joints: [
+      // hips: thigh (cy=2) <-> torso row (cy=3)
+      { a: [-1, 2], b: [-1, 3], lowerAngle: -1.2, upperAngle: 1.0, maxMotorTorque: 100, motorized: true },
+      { a: [1, 2], b: [1, 3], lowerAngle: -1.2, upperAngle: 1.0, maxMotorTorque: 100, motorized: true },
+      // knees: shin (cy=1) <-> thigh (cy=2), one-way bend
+      { a: [-1, 1], b: [-1, 2], lowerAngle: -2.2, upperAngle: 0.0, maxMotorTorque: 80, motorized: true },
+      { a: [1, 1], b: [1, 2], lowerAngle: -2.2, upperAngle: 0.0, maxMotorTorque: 80, motorized: true },
+      // ankles: foot (cy=0) <-> shin (cy=1)
+      { a: [-1, 0], b: [-1, 1], lowerAngle: -0.6, upperAngle: 0.6, maxMotorTorque: 45, motorized: true },
+      { a: [1, 0], b: [1, 1], lowerAngle: -0.6, upperAngle: 0.6, maxMotorTorque: 45, motorized: true },
+    ],
+    roots: [[0, 4]],
+    feet: [[-1, 0], [1, 0]],
+  };
+
   return {
     name: 'Default Biped',
     bodies: [
@@ -201,6 +240,7 @@ export function defaultBiped() {
       ...right.bodies,
     ],
     joints: [...left.joints, ...right.joints],
+    editorGrid: bipedGrid,
   };
 }
 
@@ -275,5 +315,274 @@ export function cloneCreature(c) {
   if (typeof structuredClone === 'function') return structuredClone(c);
   return JSON.parse(JSON.stringify(c));
 }
+
+/**
+ * creatureFromGrid(spec) — build a full, valid Creature from a GRID SPEC, the
+ * SAME tile model the editor uses. This is the shared factory the grid-native
+ * presets below are built from, so they are guaranteed self-consistent AND
+ * round-trippable: the emitted `editorGrid` is exactly the spec, so
+ * Editor.loadCreature() can rebuild them cell-for-cell.
+ *
+ * It mirrors Editor.toCreature():
+ *   • Filled cells that are 4-adjacent FUSE into ONE rigid body, UNLESS a grid
+ *     joint sits on their shared edge (a joint breaks the fusion). Each cell
+ *     becomes one box fixture of size cellSize at the cell's world center; the
+ *     body origin is the component centroid.
+ *   • Each grid joint becomes a revolute joint anchored at the shared-edge
+ *     midpoint between the two components it separates. A joint whose two cells
+ *     end up in the SAME component (reconnected elsewhere) is skipped.
+ *   • The component holding a `roots` cell is isRoot (exactly one). Components
+ *     holding a `feet` cell are isFoot, and get heavier/grippier material so
+ *     they plant like the biped's feet.
+ *
+ * spec = {
+ *   name, cellSize,
+ *   cells:  [ [cx,cy], ... ],
+ *   joints: [ { a:[cx,cy], b:[cx,cy], lowerAngle, upperAngle, maxMotorTorque, motorized } ],
+ *   roots:  [ [cx,cy], ... ],   // first entry marks the root component
+ *   feet:   [ [cx,cy], ... ],
+ * }
+ *
+ * Cell (cx,cy) has its CENTER at world { x: cx*cs, y: (cy+0.5)*cs } — identical
+ * to the editor — so a cell at cy=0 rests its bottom face on the ground (y=0).
+ * Design specs with the lowest row at cy=0 and the whole creature stands/lies
+ * on the floor at rest.
+ */
+export function creatureFromGrid(spec) {
+  const cs = spec.cellSize;
+  const key = (cx, cy) => `${cx},${cy}`;
+  const parse = (k) => k.split(',').map(Number);
+  const center = (cx, cy) => ({ x: cx * cs, y: (cy + 0.5) * cs });
+
+  const cellSet = new Set(spec.cells.map(([cx, cy]) => key(cx, cy)));
+  const joints = spec.joints || [];
+
+  // Does an edge between (x1,y1) and (x2,y2) carry a grid joint (order-free)?
+  const sameEdge = (j, x1, y1, x2, y2) => {
+    const [ax, ay] = j.a;
+    const [bx, by] = j.b;
+    return (
+      (ax === x1 && ay === y1 && bx === x2 && by === y2) ||
+      (ax === x2 && ay === y2 && bx === x1 && by === y1)
+    );
+  };
+  const jointOnEdge = (x1, y1, x2, y2) =>
+    joints.some((j) => sameEdge(j, x1, y1, x2, y2));
+
+  // Connected components: 4-adjacency, NOT crossing a jointed edge.
+  const seen = new Set();
+  const comps = []; // array of cell-key arrays
+  const compOf = new Map(); // cellKey -> component index
+  for (const start of cellSet) {
+    if (seen.has(start)) continue;
+    const cells = [];
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const cur = stack.pop();
+      cells.push(cur);
+      const [cx, cy] = parse(cur);
+      for (const [nx, ny] of [
+        [cx + 1, cy],
+        [cx - 1, cy],
+        [cx, cy + 1],
+        [cx, cy - 1],
+      ]) {
+        const nk = key(nx, ny);
+        if (!cellSet.has(nk) || seen.has(nk)) continue;
+        if (jointOnEdge(cx, cy, nx, ny)) continue; // joint breaks fusion
+        seen.add(nk);
+        stack.push(nk);
+      }
+    }
+    const idx = comps.length;
+    comps.push(cells);
+    for (const c of cells) compOf.set(c, idx);
+  }
+
+  const footSet = new Set((spec.feet || []).map(([cx, cy]) => key(cx, cy)));
+  const rootCell =
+    spec.roots && spec.roots.length ? key(spec.roots[0][0], spec.roots[0][1]) : null;
+
+  // One compound-fixture body per component (origin at the centroid).
+  const bodies = comps.map((cells, i) => {
+    const pts = cells.map((k) => {
+      const [cx, cy] = parse(k);
+      return center(cx, cy);
+    });
+    const ox = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const oy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const fixtures = pts.map((p) => ({
+      shape: 'box',
+      dx: p.x - ox,
+      dy: p.y - oy,
+      w: cs,
+      h: cs,
+    }));
+    const isFoot = cells.some((k) => footSet.has(k));
+    const body = {
+      id: `c${i}`,
+      x: ox,
+      y: oy,
+      angle: 0,
+      // Feet: heavier + grippier so the base plants (mirrors the biped feet).
+      density: isFoot ? 2.0 : 1.0,
+      friction: isFoot ? 0.95 : 0.6,
+      fixtures,
+    };
+    if (isFoot) body.isFoot = true;
+    return body;
+  });
+
+  // Root: the component holding the root marker, else the biggest part.
+  let rootIdx =
+    rootCell != null && compOf.has(rootCell)
+      ? compOf.get(rootCell)
+      : comps.reduce((best, c, i, arr) => (c.length > arr[best].length ? i : best), 0);
+  bodies[rootIdx].isRoot = true;
+
+  // Revolute joints: one per grid joint whose two cells are in DIFFERENT parts.
+  const outJoints = [];
+  for (const gj of joints) {
+    const ka = key(gj.a[0], gj.a[1]);
+    const kb = key(gj.b[0], gj.b[1]);
+    if (!cellSet.has(ka) || !cellSet.has(kb)) continue;
+    const ia = compOf.get(ka);
+    const ib = compOf.get(kb);
+    if (ia === ib) continue; // both sides fused into one part: skip
+    const a = center(gj.a[0], gj.a[1]);
+    const b = center(gj.b[0], gj.b[1]);
+    outJoints.push({
+      id: `gj${outJoints.length}`,
+      bodyA: `c${ia}`,
+      bodyB: `c${ib}`,
+      anchor: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      lowerAngle: gj.lowerAngle,
+      upperAngle: gj.upperAngle,
+      maxMotorTorque: gj.maxMotorTorque,
+      motorized: gj.motorized !== false,
+    });
+  }
+
+  // Emit editorGrid straight from the spec so load-into-editor rebuilds it 1:1.
+  const editorGrid = {
+    cellSize: cs,
+    cells: spec.cells.map(([cx, cy]) => [cx, cy]),
+    joints: joints.map((j) => ({
+      a: [j.a[0], j.a[1]],
+      b: [j.b[0], j.b[1]],
+      lowerAngle: j.lowerAngle,
+      upperAngle: j.upperAngle,
+      maxMotorTorque: j.maxMotorTorque,
+      motorized: j.motorized !== false,
+    })),
+    roots: (spec.roots || []).map(([cx, cy]) => [cx, cy]),
+    feet: (spec.feet || []).map(([cx, cy]) => [cx, cy]),
+  };
+
+  return validateCreature({ name: spec.name, bodies, joints: outJoints, editorGrid });
+}
+
+/**
+ * defaultQuadruped() — a low, long four-legged creature (side view).
+ *
+ * A horizontal SPINE (one fused body, 7 cells at cy=2) carries FOUR legs, each
+ * two segments (upper + foot). Legs hang at cx = -3, -1, 1, 3 — spaced two
+ * apart so neighbouring legs never fuse — which reads as a back pair (-3,-1)
+ * and a front pair (1,3). Each leg: upper cell at cy=1 (hip joint to the spine)
+ * and a foot cell at cy=0 (knee joint to the upper). Feet rest on the ground.
+ *
+ *   spine:  (-3,2)(-2,2)(-1,2)(0,2)(1,2)(2,2)(3,2)     root = (0,2)
+ *   legs :  (-3,1)     (-1,1)     (1,1)     (3,1)       uppers  (hips)
+ *           (-3,0)     (-1,0)     (1,0)     (3,0)       feet    (knees) isFoot
+ *
+ * Hips get symmetric ~±1 rad limits (torque 90); knees a one-way bend
+ * (torque 70), so the legs can push the body forward.
+ */
+export function defaultQuadruped() {
+  const legXs = [-3, -1, 1, 3];
+  const cells = [];
+  const joints = [];
+  const feet = [];
+  // Spine row spans the outermost legs so every hip cell has a spine cell above.
+  for (let cx = -3; cx <= 3; cx++) cells.push([cx, 2]);
+  for (const x of legXs) {
+    cells.push([x, 1], [x, 0]); // upper, foot
+    feet.push([x, 0]);
+    // Hip: upper (cy=1) <-> spine (cy=2).
+    joints.push({
+      a: [x, 1],
+      b: [x, 2],
+      lowerAngle: -1.0,
+      upperAngle: 1.0,
+      maxMotorTorque: 90,
+      motorized: true,
+    });
+    // Knee: foot (cy=0) <-> upper (cy=1), one-way bend.
+    joints.push({
+      a: [x, 0],
+      b: [x, 1],
+      lowerAngle: -1.6,
+      upperAngle: 0.2,
+      maxMotorTorque: 70,
+      motorized: true,
+    });
+  }
+  return creatureFromGrid({
+    name: 'Default Quadruped',
+    cellSize: 0.3,
+    cells,
+    joints,
+    roots: [[0, 2]],
+    feet,
+  });
+}
+
+/**
+ * defaultCrawler() — a worm/snake: a horizontal CHAIN of 5 segments lying on
+ * the ground (all cells at cy=0), linked by motorized revolute joints. Placing
+ * a joint on every shared edge breaks fusion, so the row becomes 5 separate
+ * bodies that can undulate. Limits ~±0.9 rad let it flex into an S and crawl.
+ *
+ *   (0,0)-(1,0)-(2,0)-(3,0)-(4,0)      root = middle (2,0); ends are isFoot
+ *
+ * The two END segments are flagged isFoot (ground-contact obs + extra grip) so
+ * the worm can anchor an end and drag itself forward.
+ */
+export function defaultCrawler() {
+  const n = 5;
+  const cells = [];
+  const joints = [];
+  for (let i = 0; i < n; i++) cells.push([i, 0]);
+  for (let i = 0; i < n - 1; i++) {
+    joints.push({
+      a: [i, 0],
+      b: [i + 1, 0],
+      lowerAngle: -0.9,
+      upperAngle: 0.9,
+      maxMotorTorque: 60,
+      motorized: true,
+    });
+  }
+  return creatureFromGrid({
+    name: 'Default Worm',
+    cellSize: 0.3,
+    cells,
+    joints,
+    roots: [[2, 0]], // middle segment
+    feet: [[0, 0], [n - 1, 0]], // the two ends
+  });
+}
+
+/**
+ * PRESETS — the spawnable creature registry. The app iterates this to offer
+ * more than just the biped; every `make()` returns a fresh, valid creature that
+ * also carries `editorGrid`, so all three are editable on the grid.
+ */
+export const PRESETS = [
+  { id: 'biped', name: 'Biped', emoji: '🚶', make: defaultBiped },
+  { id: 'quadruped', name: 'Quadruped', emoji: '🐕', make: defaultQuadruped },
+  { id: 'crawler', name: 'Worm', emoji: '🐛', make: defaultCrawler },
+];
 
 export default defaultBiped;
