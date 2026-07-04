@@ -37,14 +37,16 @@ export const sceneryConfig = Object.freeze({
     // is hashed per tile so no two elements are identical — that kills the AI
     // clip-art look. Fills are FLAT (no soft radial blobs).
 
-    // SUN: a single clean flat pale disc with one gentle radial halo (no rings).
+    // SUN: a small pale disc with a barely-lighter warm CORE (subtle radial
+    // gradient, not a dead-flat fill) plus one gentle radial halo (no rings).
     sun: Object.freeze({
       factor: 0.03, // near-pinned drift — furthest thing in the scene
       worldX: 0, // fixed world-x anchor (single sun, not a repeating field)
       topFrac: 0.14, // vertical center as a fraction down the cell (high sky)
-      radius: 2.1, // sun disc radius, meters (× ppm)
+      radius: 1.85, // sun disc radius, meters (× ppm) — slightly smaller/distant
       glowFrac: 1.7, // halo reach as a multiple of the disc radius
-      color: 'rgba(247,240,220,0.72)', // pale warm cream disc, flat
+      coreColor: 'rgba(250,245,228,0.82)', // hair-lighter warm cream at the center
+      color: 'rgba(247,240,220,0.72)', // pale warm cream at the disc rim
       glowColor: 'rgba(247,240,220,0.20)', // gentle warm halo at the disc edge
       glowEdgeColor: 'rgba(247,240,220,0)', // fully transparent — halo's outer stop
     }),
@@ -84,25 +86,31 @@ export const sceneryConfig = Object.freeze({
       ],
     }),
 
-    // CLOUDS: sparse, flat, elongated horizontal streaks (stratus), soft-faded
-    // top+bottom so they feather into the sky — NO puffy lobed cumulus.
+    // CLOUDS: sparse, flat, SOFT STRATUS — each cloud is a few overlapping flat
+    // rounded lobes of varying radius along a gentle horizontal axis, with a soft
+    // top+bottom alpha fade so it feathers into the sky. Reads as a low soft
+    // cloud — NOT a capsule, NOT tall puffy cumulus, no concave "beak" notches.
     clouds: Object.freeze({
       factor: 0.08, // furthest-feeling drift (sky)
       spacing: 11.0, // meters between candidate cloud slots
       jitter: 3.0, // ± meters stable jitter
-      density: 0.5, // fraction of slots that actually get a cloud (sparse sky)
+      density: 0.62, // fraction of slots that get a cloud (calm but not lonely)
       topFrac: 0.1, // cloud band starts this fraction down the cell
-      bandFrac: 0.26, // …and spans this fraction of the cell height
-      minW: 2.6, // streak length range, meters (elongated)
+      bandFrac: 0.32, // …and spans this fraction of the cell height (vertical spread)
+      minW: 2.6, // overall cloud length range, meters (elongated)
       maxW: 5.6,
-      minH: 0.34, // streak thickness range, meters (thin, flat)
+      minH: 0.34, // overall cloud thickness range, meters (thin, flat, low)
       maxH: 0.62,
+      lobeMin: 3, // fewest overlapping lobes per cloud
+      lobeMax: 5, // most overlapping lobes per cloud
       color: 'rgba(248,246,240,0.7)', // soft warm-white core (flat, ~0.7)
       edgeColor: 'rgba(248,246,240,0)', // transparent top/bottom fade
     }),
 
-    // TREES: two irregular depth ROWS of varied two-form silhouettes (rounded
-    // broadleaf + narrow conifer), flat fills, slight per-tree tilt, sparse.
+    // TREES: two irregular depth ROWS of varied two-form silhouettes — a rounded
+    // broadleaf (with a subtle darker inner lobe for a hint of volume) and a
+    // small layered fir (2–3 stacked tiers). Flat fills, slight per-tree tilt,
+    // sparse. Per-tree height/width/form/tilt is hashed so no two are identical.
     trees: Object.freeze({
       minH: 1.4, // base tree height range, meters (× row.scale)
       maxH: 2.7,
@@ -116,6 +124,7 @@ export const sceneryConfig = Object.freeze({
         density: 0.6, // fraction of slots with a tree
         scale: 0.78, // height multiplier (smaller, further)
         canopyColor: 'rgba(126,150,112,0.4)', // pale muted sage
+        canopyShadeColor: 'rgba(104,128,96,0.34)', // darker inner lobe (hint of volume)
         trunkColor: 'rgba(120,98,78,0.34)', // muted warm brown
       }),
       // FRONT row: deeper, larger, still sparse — sweeps by faster.
@@ -126,6 +135,7 @@ export const sceneryConfig = Object.freeze({
         density: 0.5,
         scale: 1.0,
         canopyColor: 'rgba(96,124,84,0.5)', // deeper muted olive-green
+        canopyShadeColor: 'rgba(78,104,68,0.42)', // darker inner lobe (hint of volume)
         trunkColor: 'rgba(96,74,56,0.46)', // deeper muted brown
       }),
     }),

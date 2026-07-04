@@ -23,9 +23,10 @@
  * ART DIRECTION (why it reads as designed, not AI clip-art): flat fills (no soft
  * radial blobs), a MUTED limited palette, and per-element VARIETY driven by a
  * deterministic hash — varied heights, widths, tilt, form and spacing jitter so
- * no two elements are identical. Clouds are sparse flat streaks (no puffy lobed
- * cumulus), trees are irregular two-form silhouettes in two depth rows, hills
- * are overlapping tonal bands (not repeated mounds).
+ * no two elements are identical. Clouds are sparse soft stratus (a few flat
+ * overlapping lobes, not tall puffy cumulus), trees are irregular two-form
+ * silhouettes (broadleaf + layered fir) in two depth rows, hills are overlapping
+ * tonal bands (not repeated mounds).
  *
  * PARALLAX MATH (see layerScreenX): the real camera maps world x with
  *   screenX = offsetX + viewW/2 + (worldX - focusX) * ppm.
@@ -114,10 +115,12 @@ export function drawParallax(ctx, camera) {
 }
 
 /**
- * SUN — a single clean FLAT pale disc with ONE gentle radial halo (no rings).
- * Anchored to a fixed world x so there's exactly one sun; the tiny parallax
- * `factor` still gives it a barely-perceptible drift so it reads as very
- * distant. Sits high in the cell by a fraction of the cell height.
+ * SUN — a single pale disc with ONE gentle radial halo (no rings). The disc
+ * itself carries a SUBTLE radial gradient (a hair-lighter warm cream core fading
+ * to the rim cream) so it isn't a dead-flat fill, yet still reads as a hazy
+ * distant sun, not a bright bulb. Anchored to a fixed world x so there's exactly
+ * one sun; the tiny parallax `factor` still gives it a barely-perceptible drift
+ * so it reads as very distant. Sits high in the cell by a fraction of height.
  */
 function drawSun(ctx, camera, SUN) {
   const oy = camera.offsetY || 0;
@@ -140,8 +143,12 @@ function drawSun(ctx, camera, SUN) {
   ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
   ctx.fill();
 
-  // The clean flat pale disc on top.
-  ctx.fillStyle = SUN.color;
+  // The pale disc on top — a SUBTLE radial gradient (hair-lighter warm cream
+  // center -> the rim cream) so it isn't a dead-flat fill, staying hazy + muted.
+  const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  disc.addColorStop(0, SUN.coreColor);
+  disc.addColorStop(1, SUN.color);
+  ctx.fillStyle = disc;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
@@ -190,11 +197,14 @@ function drawHills(ctx, camera, H) {
 }
 
 /**
- * CLOUDS — SPARSE, flat, soft-edged ELONGATED horizontal streaks (stratus), NOT
- * puffy stacked lobes. Each cloud is a single horizontal rounded lozenge with a
- * soft vertical alpha fade (top->transparent, bottom->transparent) so its edges
- * feather without any concave "beak" notch. Width/length/height vary per tile,
- * and a sparsity gate skips most tiles so the sky stays open.
+ * CLOUDS — SPARSE, flat SOFT STRATUS. Each cloud is composed of a few (3–5)
+ * overlapping flat rounded LOBES of varying radius, arranged along a gentle
+ * horizontal axis (lobe count/sizes/offsets all hashed per cloud, deterministic).
+ * All lobes go into ONE path filled ONCE, so overlaps UNION at a single alpha —
+ * flat and low-contrast, never darkening where lobes meet, and with no concave
+ * "beak" notch. A soft top/bottom alpha fade feathers it into the sky, so it
+ * reads as a low soft cloud — NOT a capsule and NOT tall puffy cumulus. Overall
+ * length/thickness vary per tile, and a sparsity gate keeps the sky calm+open.
  */
 function drawClouds(ctx, camera, C) {
   const oy = camera.offsetY || 0;
@@ -209,42 +219,47 @@ function drawClouds(ctx, camera, C) {
     const wx = i * C.spacing + jitter;
     const cx = layerScreenX(camera, wx, C.factor);
     const cy = bandTop + hash01(i, 42) * bandH; // stable vertical spot in the band
-    const w = lerp(C.minW, C.maxW, hash01(i, 43)) * camera.ppm; // streak length, px
-    const h = lerp(C.minH, C.maxH, hash01(i, 44)) * camera.ppm; // streak thickness, px
+    const w = lerp(C.minW, C.maxW, hash01(i, 43)) * camera.ppm; // overall length, px
+    const h = lerp(C.minH, C.maxH, hash01(i, 44)) * camera.ppm; // overall thickness, px
 
-    // Soft top/bottom fade so the flat streak feathers into the sky (no hard rim).
-    const grad = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2);
+    // Soft top/bottom fade so the flat cloud feathers into the sky (no hard rim).
+    // Widen the fade span a touch past the thickest lobe so caps stay soft too.
+    const grad = ctx.createLinearGradient(0, cy - h * 0.9, 0, cy + h * 0.9);
     grad.addColorStop(0, C.edgeColor);
     grad.addColorStop(0.5, C.color);
     grad.addColorStop(1, C.edgeColor);
     ctx.fillStyle = grad;
 
-    // A single horizontal capsule (rounded-end lozenge) — elongated, flat.
-    roundedCapsule(ctx, cx, cy, w, h);
+    // How many overlapping lobes make up THIS cloud (deterministic per tile).
+    const lobes = Math.round(lerp(C.lobeMin, C.lobeMax, hash01(i, 45)));
+    const rEnd = h * 0.7; // keep lobe centers inside the length so ends round off
+    const left = cx - w / 2 + rEnd;
+    const right = cx + w / 2 - rEnd;
+
+    // Build every lobe into ONE path, then fill once (union at a single alpha).
+    ctx.beginPath();
+    for (let L = 0; L < lobes; L++) {
+      // Evenly place centers along the axis, then nudge each with a hashed offset.
+      const t = lobes <= 1 ? 0.5 : L / (lobes - 1);
+      const lx = lerp(left, right, t) + (hash01(i, 50 + L) - 0.5) * rEnd * 0.6;
+      const rx = h * lerp(0.6, 1.1, hash01(i, 60 + L)); // lobe half-width (wider than tall)
+      const ry = (h / 2) * lerp(0.72, 1.0, hash01(i, 70 + L)); // lobe half-height (flat)
+      const ly = cy + (hash01(i, 80 + L) - 0.5) * h * 0.3; // gentle top/bottom variance
+      ctx.moveTo(lx + rx, ly); // start each lobe fresh so no chord links them
+      ctx.ellipse(lx, ly, rx, ry, 0, 0, Math.PI * 2);
+    }
     ctx.fill();
   }
   ctx.restore();
 }
 
-/** A horizontal capsule centered at (cx,cy): a rect with semicircular caps. */
-function roundedCapsule(ctx, cx, cy, w, h) {
-  const r = h / 2;
-  const left = cx - w / 2 + r;
-  const right = cx + w / 2 - r;
-  ctx.beginPath();
-  ctx.arc(left, cy, r, Math.PI / 2, (Math.PI * 3) / 2);
-  ctx.lineTo(right, cy - r);
-  ctx.arc(right, cy, r, (Math.PI * 3) / 2, Math.PI / 2);
-  ctx.lineTo(left, cy + r);
-  ctx.closePath();
-}
-
 /**
  * TREES — VARIED, IRREGULAR flat silhouettes in TWO depth rows. Each tree picks
- * one of two forms from a hash: a rounded BROADLEAF (wide, low crown) or a
- * taller NARROW conifer-ish form. Height, crown width, a slight tilt and spacing
- * jitter all vary per tile, so the row never reads as a cloned cotton-ball line.
- * The back row is smaller/paler and set behind; the front row is larger/darker.
+ * one of two forms from a hash: a rounded BROADLEAF (wide, low crown, with a
+ * subtle darker inner lobe for a hint of volume) or a small layered FIR built
+ * from 2–3 stacked triangular tiers. Height, crown width, a slight tilt and
+ * spacing jitter all vary per tile, so the row never reads as a cloned line. The
+ * back row is smaller/paler and set behind; the front row is larger/darker.
  */
 function drawTrees(ctx, camera, T) {
   ctx.save();
@@ -283,23 +298,44 @@ function drawTreeRow(ctx, camera, T, row, saltBase) {
 
     ctx.fillStyle = row.canopyColor;
     if (isConifer) {
-      // Tall NARROW form: a slim triangular crown (flat fill, asymmetric width).
-      const halfW = hpx * lerp(0.16, 0.24, hash01(i, saltBase + 6));
+      // Small layered FIR: 2–3 stacked triangular tiers, bottom widest, each
+      // upper tier narrower + higher, overlapping the one below into a fir
+      // silhouette. All tiers go into ONE path filled ONCE, so overlaps union at
+      // a single flat alpha (no darkening seams). Coords: y is negative upward,
+      // so topY (apex) is the most-negative and baseY (foliage bottom) is higher.
+      const tiers = Math.round(lerp(2, 3, hash01(i, saltBase + 6)));
+      const topY = -hpx; // apex
+      const baseY = -trunkH; // foliage sits on the trunk top
+      const span = baseY - topY; // total foliage height (positive)
+      const halfWBase = hpx * lerp(0.16, 0.24, hash01(i, saltBase + 7)); // widest tier
       ctx.beginPath();
-      ctx.moveTo(0, -hpx); // apex
-      ctx.lineTo(-halfW, -trunkH); // left base
-      ctx.lineTo(halfW * 0.9, -trunkH); // right base (slightly asymmetric)
-      ctx.closePath();
+      for (let t = 0; t < tiers; t++) {
+        const segTop = topY + span * (t / tiers); // this tier's apex
+        // Base drops a touch past the segment so tiers overlap (no gaps between).
+        const drawBot = Math.min(baseY, topY + span * ((t + 1) / tiers) + span * 0.05);
+        const halfW = halfWBase * lerp(0.5, 1.0, (t + 1) / tiers); // lower = wider
+        ctx.moveTo(0, segTop); // apex
+        ctx.lineTo(-halfW, drawBot); // left base
+        ctx.lineTo(halfW * 0.92, drawBot); // right base (slightly asymmetric)
+        ctx.closePath();
+      }
       ctx.fill();
     } else {
       // Rounded BROADLEAF form: a low wide crown as a single flat ellipse whose
       // radii differ (asymmetric), sat on the trunk top — no lobed blob stack.
-      const crownR = hpx * lerp(0.30, 0.40, hash01(i, saltBase + 7));
+      // Slightly wider variety range so some crowns are rounder, some taller.
+      const crownR = hpx * lerp(0.28, 0.42, hash01(i, saltBase + 7));
       const crownCy = -trunkH - crownR * 0.72;
-      const rx = crownR * lerp(1.05, 1.35, hash01(i, saltBase + 8)); // wider than tall
-      const ry = crownR * lerp(0.78, 0.95, hash01(i, saltBase + 9));
+      const rx = crownR * lerp(1.0, 1.42, hash01(i, saltBase + 8)); // wider than tall
+      const ry = crownR * lerp(0.72, 1.02, hash01(i, saltBase + 9));
       ctx.beginPath();
       ctx.ellipse(0, crownCy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // A slightly darker inner lobe, offset toward the lower-right, for a hint
+      // of volume (a second flat tone) — kept subtle so the tree stays flat.
+      ctx.fillStyle = row.canopyShadeColor;
+      ctx.beginPath();
+      ctx.ellipse(rx * 0.18, crownCy + ry * 0.30, rx * 0.68, ry * 0.60, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
