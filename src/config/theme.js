@@ -8,12 +8,12 @@
 export const themeConfig = Object.freeze({
   // --- Glass-on-gradient theme (UI + canvas) -----------------------------
   theme: Object.freeze({
-    cellPanel: 'rgba(255,255,255,0.05)', // translucent card behind each lane
-    cellBorder: 'rgba(255,255,255,0.16)', // hairline glass edge
+    cellPanel: 'rgba(74,62,48,0.05)', // faint warm-neutral card behind each lane
+    cellBorder: 'rgba(74,62,48,0.16)', // hairline sepia cell edge
     cellRadius: 18, // rounded corners for a lane cell, px
     focusBorder: 'rgba(143,211,255,0.85)', // focused-lane accent edge
-    groundBand: 'rgba(255,255,255,0.12)', // soft translucent ground fill
-    groundEdge: 'rgba(255,255,255,0.30)', // gentle ground highlight line
+    groundBand: 'rgba(74,62,48,0.12)', // matte studio-floor fill (warm sepia)
+    groundEdge: 'rgba(74,62,48,0.40)', // sepia ground line (the calibrated floor)
     root: '#8fd3ff', // torso / root body
     foot: '#ffd98a', // feet
     limb: '#e7ecff', // other limbs

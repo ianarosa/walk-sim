@@ -1,70 +1,49 @@
 /*
- * scenery.js — motion cues: ground distance markers + parallax backdrop.
+ * scenery.js — motion cues: a MUYBRIDGE-STYLE CALIBRATED MOTION FIELD.
  * =====================================================================
- * Pure drawing, called from render.js INSIDE the cell clip, so everything
- * here is translucent glass on top of the page's animated gradient sky and is
- * clipped to (and framed by) each lane's rounded cell — exactly like the
- * bodies. Nothing here touches physics; it only reads a Camera and CONFIG.
+ * Pure drawing, called from render/core.js INSIDE the cell clip, so everything
+ * here is drawn on top of the page's static study-plate sky and is clipped to
+ * (and framed by) each lane's rounded cell — exactly like the bodies. Nothing
+ * here touches physics; it only reads a Camera and CONFIG.
  *
- * Two jobs, both meant to make it obvious the walker is TRAVELLING:
+ * The world is styled as the gridded, numbered wall Eadweard Muybridge shot his
+ * walking animals against — a measured biomechanics field, NOT a landscape. Two
+ * jobs, both meant to make it obvious the walker is TRAVELLING:
  *
- *   1. drawDistanceMarkers(ctx, camera) — regularly spaced ticks + "Nm" labels
- *      pinned to WORLD x (a START line at x=0, majors every `markerInterval`,
- *      minors every `markerMinor`). They live at fixed world positions, so as
- *      the camera chases the root they SCROLL past. Drawn with the REAL camera
- *      (parallax factor 1) so they sit exactly on the ground.
+ *   1. drawParallax(ctx, camera) — the CALIBRATED BACKDROP (call BEFORE the
+ *      ground band + creature). A scrolling vertical meter grid (every 1m, bold
+ *      every 5m) plus faint horizontal reference lines at whole-meter heights —
+ *      the measurement wall. Everything is pinned to WORLD x with the REAL
+ *      camera (parallax factor 1), so the grid is "painted on the field" and
+ *      scrolls past as the camera chases the root. That scroll IS the travel cue.
  *
- *   2. drawParallax(ctx, camera) — layered stationary scenery (far hills,
- *      clouds, mid trees, near bushes). Each layer is drawn through a VIRTUAL
- *      camera whose focus x = camera.focusX * factor. With factor 1 a layer
- *      moves fully with the world; with factor 0 it is pinned to the screen.
- *      Distant layers use a small factor so they barely drift while near ones
- *      sweep by — that difference in drift IS the sensation of motion.
+ *   2. drawDistanceMarkers(ctx, camera) — regularly spaced ground ticks + "Nm"
+ *      labels pinned to WORLD x (a START line at x=0, majors every
+ *      `markerInterval`, minors every `markerMinor`), plus milestone pennant
+ *      flags every 10m (the ONE amber accent). Also drawn with the real camera
+ *      (factor 1) so ticks sit exactly on the ground.
  *
- * PARALLAX MATH (see layerScreenX): the real camera maps world x with
+ * MAPPING (see layerScreenX): the real camera maps world x with
  *   screenX = offsetX + viewW/2 + (worldX - focusX) * ppm.
- * A layer just swaps the real focus for a scaled one:
+ * A layer can swap the real focus for a scaled one (factor):
  *   screenX = offsetX + viewW/2 + (worldX - focusX*factor) * ppm.
- * So when focusX moves by Δ, a layer's on-screen shift is Δ*factor*ppm — i.e.
- * proportional to factor. We keep ppm (and the y mapping) identical to the real
- * camera so trees stand on the same ground line and scale like the creature.
+ * The backdrop uses factor 1 throughout (painted on the field). We keep ppm (and
+ * the y mapping) identical to the real camera so the grid stands on the same
+ * ground line and scales like the creature.
  *
- * DETERMINISM: scenery is a repeating FIELD. For each layer we only visit the
- * integer tile indices whose world x is on screen (culled from the camera), and
- * every per-object property (jitter, height, variant) comes from hash01(tile,
- * salt) — a pure integer hash. No Math.random, no per-frame state: a given tile
- * looks identical every frame, so the field never flickers, yet it tiles/wraps
- * out to any x the creature can reach.
+ * DETERMINISM: every mark lives at a FIXED world position (integer meters). We
+ * only visit the meter indices whose world x is on screen (culled from the
+ * camera), so the loops are small and bounded, and the field looks identical
+ * every frame — no Math.random, no per-frame state, no flicker.
  */
 
 import { CONFIG } from './config.js';
 
-/* --------------------------------------------------------------------------
- * Deterministic hashing helpers.
- * hash01(n, salt) -> a stable pseudo-random float in [0,1) for integer inputs.
- * We fold a `salt` in so one tile index can yield several independent values
- * (x jitter, height, variant, …) without correlating between them.
- * ------------------------------------------------------------------------ */
-function hash01(n, salt = 0) {
-  // Mix the tile index with the salt, then run a couple of xorshift/multiply
-  // rounds (Math.imul keeps this 32-bit and identical across engines).
-  let h = (n | 0) ^ Math.imul(salt | 0, 0x9e3779b1);
-  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
-  h ^= h >>> 12;
-  h = Math.imul(h ^ (h >>> 4), 0x297a2d39);
-  h ^= h >>> 15;
-  return (h >>> 0) / 4294967296; // 0xffffffff+1 -> normalize to [0,1)
-}
-
-/** Map a value in [0,1) onto [lo, hi]. */
-function lerp(lo, hi, t) {
-  return lo + (hi - lo) * t;
-}
-
 /**
  * layerScreenX(camera, worldX, factor) — the parallax x mapping.
  * Identical to camera.worldToScreen's x, but with the focus scaled by `factor`
- * so the layer drifts at rate `factor` relative to the real world.
+ * so the layer drifts at rate `factor` relative to the real world. The backdrop
+ * uses factor 1 (fully world-locked); the helper is kept general.
  */
 function layerScreenX(camera, worldX, factor) {
   return (
@@ -77,8 +56,8 @@ function layerScreenX(camera, worldX, factor) {
 /**
  * visibleTiles(camera, factor, spacing, marginM) — the inclusive [first,last]
  * tile-index range whose centers can appear in this cell, so callers loop only
- * over on-screen objects (never thousands). `marginM` pads the range in meters
- * so objects wider than one tile don't pop in/out at the cell edges.
+ * over on-screen marks (never thousands). `marginM` pads the range in meters so
+ * marks wider than one tile don't pop in/out at the cell edges.
  *
  * The layer's world center is focusX*factor; the cell shows ±(viewW/2)/ppm
  * meters around it. Tile i sits near x = i*spacing, hence the divisions below.
@@ -95,164 +74,97 @@ function visibleTiles(camera, factor, spacing, marginM) {
 }
 
 /* ==========================================================================
- * FEATURE 2 — parallax scenery (call BEFORE the ground band + creature).
- * Draws back-to-front: far hills -> clouds -> mid trees -> near bushes.
+ * FEATURE 2 — the calibrated motion field (call BEFORE the ground band +
+ * creature). Draws back-to-front: far-horizon band -> horizontal wall lines ->
+ * vertical meter grid. All pinned to world x (factor 1) so it scrolls past.
  * ======================================================================== */
 export function drawParallax(ctx, camera) {
-  const S = CONFIG.scenery;
-  drawSun(ctx, camera, S.sun); // furthest of all — behind the hills
-  drawHills(ctx, camera, S.hills);
-  drawClouds(ctx, camera, S.clouds);
-  drawTrees(ctx, camera, S.trees);
-  drawBushes(ctx, camera, S.bushes);
+  const G = CONFIG.scenery.grid;
+  drawHorizon(ctx, camera, G); // faint flat depth hint, furthest back
+  drawWallLines(ctx, camera, G); // horizontal whole-meter height references
+  drawMeterGrid(ctx, camera, G); // vertical 1m gridlines, bold every Nth
 }
 
 /**
- * A SINGLE soft sun disc, the furthest layer of all. It is anchored to one
- * fixed world x (SUN.worldX) rather than tiled, so there's exactly one sun; the
- * tiny parallax `factor` still gives it a gentle drift so it reads as distant.
- * Sits high in the cell by a fraction of the cell height (like clouds' band),
- * and is a warm translucent disc with a smooth radial-gradient halo (no rings).
+ * A single faint, flat far-horizon band spanning the cell width, a low hint of
+ * depth behind the grid. Positioned by a fraction of the cell height so it sits
+ * regardless of where the ground line falls. Deliberately minimal and flat —
+ * no mounds, no gradient sprawl.
  */
-function drawSun(ctx, camera, SUN) {
+function drawHorizon(ctx, camera, G) {
+  if (!G.horizonColor) return; // horizon band is optional
+  const ox = camera.offsetX || 0;
   const oy = camera.offsetY || 0;
-  const cx = layerScreenX(camera, SUN.worldX, SUN.factor); // near-pinned drift
-  const cy = oy + camera.viewH * SUN.topFrac; // high-sky vertical spot
-  const r = SUN.radius * camera.ppm; // disc radius, px (meters × ppm)
-
-  // Cull if the whole disc + its glow is off either side of the cell.
-  const glowR = r * SUN.glowFrac; // outermost halo reach
-  if (cx + glowR < 0 || cx - glowR > camera.viewW) return;
+  const y = oy + camera.viewH * G.horizonFrac; // band center, px down the cell
 
   ctx.save();
-  // Soft halo: ONE radial gradient warm at the disc edge, fading to transparent
-  // at glowR — a smooth falloff with no visible ring banding.
-  const halo = ctx.createRadialGradient(cx, cy, r, cx, cy, glowR);
-  halo.addColorStop(0, SUN.glowColor);
-  halo.addColorStop(1, SUN.glowEdgeColor);
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
-  ctx.fill();
-
-  // The solid warm disc on top.
-  ctx.fillStyle = SUN.color;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = G.horizonColor;
+  ctx.fillRect(ox, y - G.horizonH / 2, camera.viewW, G.horizonH);
   ctx.restore();
 }
 
-/** Far hills: soft rounded mounds sitting on the ground line, two tinted rows. */
-function drawHills(ctx, camera, H) {
-  const groundY = camera.worldToScreen(0, CONFIG.ground.y).y;
-  // Cull generously — a hill's half-width can be several meters.
-  const { first, last } = visibleTiles(camera, H.factor, H.spacing, H.maxH * H.widthFrac);
-
-  ctx.save();
-  for (let i = first; i <= last; i++) {
-    // Stable per-hill values from the tile index.
-    const jitter = (hash01(i, 1) - 0.5) * 2 * H.jitter; // ± jitter meters
-    const wx = i * H.spacing + jitter;
-    const heightM = lerp(H.minH, H.maxH, hash01(i, 2)); // hill height, meters
-    const isFront = hash01(i, 3) < 0.5; // two depth rows for a layered look
-
-    const cx = layerScreenX(camera, wx, H.factor);
-    const rY = heightM * camera.ppm; // vertical radius, px
-    const rX = heightM * H.widthFrac * camera.ppm; // horizontal radius, px
-
-    // A half-ellipse mound whose flat base rests on the ground line.
-    ctx.beginPath();
-    ctx.ellipse(cx, groundY, rX, rY, 0, Math.PI, Math.PI * 2);
-    ctx.closePath();
-    ctx.fillStyle = isFront ? H.colorNear : H.colorFar;
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-/** Clouds: clusters of soft white lobes drifting slowly high in the cell. */
-function drawClouds(ctx, camera, C) {
+/**
+ * Horizontal "measurement wall" reference lines at whole-meter HEIGHTS above the
+ * ground line (1m, 2m, 3m…), thin and very faint, spanning the cell width — the
+ * calibrated wall the specimen is measured against. Screen-up is negative y, so
+ * a height h meters above the ground is groundY - h*ppm (matches how bodies
+ * measure up from the ground).
+ */
+function drawWallLines(ctx, camera, G) {
+  const ox = camera.offsetX || 0;
   const oy = camera.offsetY || 0;
-  // Clouds live in a horizontal band defined as fractions of the cell height,
-  // so they float in the "sky" regardless of where the ground line sits.
-  const bandTop = oy + camera.viewH * C.topFrac;
-  const bandH = camera.viewH * C.bandFrac;
-  const { first, last } = visibleTiles(camera, C.factor, C.spacing, C.maxR * 3);
+  const groundY = camera.worldToScreen(0, CONFIG.ground.y).y;
 
   ctx.save();
-  ctx.fillStyle = C.color;
-  for (let i = first; i <= last; i++) {
-    const jitter = (hash01(i, 11) - 0.5) * 2 * C.jitter;
-    const wx = i * C.spacing + jitter;
-    const cx = layerScreenX(camera, wx, C.factor);
-    const cy = bandTop + hash01(i, 12) * bandH; // stable vertical spot in the band
-    const r = lerp(C.minR, C.maxR, hash01(i, 13)) * camera.ppm;
-
-    // A cloud = three overlapping lobes; sizes/offsets are stable hashes.
+  ctx.strokeStyle = G.wallColor;
+  ctx.lineWidth = G.wallWidth;
+  for (const h of G.wallHeights) {
+    const y = groundY - h * camera.ppm; // px height above the ground line
+    if (y < oy) continue; // above the top of the cell -> skip (cull)
+    // Half-pixel snap keeps a 1px line crisp instead of blurring over two rows.
+    const sy = Math.round(y) + 0.5;
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.arc(cx - r * 0.85, cy + r * 0.28, r * 0.72, 0, Math.PI * 2);
-    ctx.arc(cx + r * 0.9, cy + r * 0.22, r * 0.66, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(ox, sy);
+    ctx.lineTo(ox + camera.viewW, sy);
+    ctx.stroke();
   }
   ctx.restore();
 }
 
-/** Mid trees: a soft round canopy on a short trunk, standing on the ground. */
-function drawTrees(ctx, camera, T) {
+/**
+ * The vertical METER GRID: a faint line at every 1m of world x rising from the
+ * ground line to the top of the cell, with every Nth meter (majorEvery) drawn
+ * BOLDER/darker — the numbered gridlines on Muybridge's backdrop wall. Pinned to
+ * world x with the real camera (factor 1) so the whole grid scrolls past as the
+ * walker travels; that scroll is the primary travel cue.
+ */
+function drawMeterGrid(ctx, camera, G) {
+  const oy = camera.offsetY || 0;
   const groundY = camera.worldToScreen(0, CONFIG.ground.y).y;
-  const { first, last } = visibleTiles(camera, T.factor, T.spacing, T.maxH);
+  const topY = oy; // grid rises to the top edge of the cell
+
+  // Visible world-x span for the REAL camera (factor 1): only draw within it.
+  const halfW = camera.viewW / 2 / camera.ppm;
+  const minWX = camera.focusX - halfW;
+  const maxWX = camera.focusX + halfW;
+
+  // Every `minorEvery` meters is a line; every `majorEvery` meters is bold.
+  const step = G.minorEvery; // meters between vertical lines
+  const majorMod = Math.max(1, Math.round(G.majorEvery / G.minorEvery)); // e.g. 5
+  const firstN = Math.floor(minWX / step);
+  const lastN = Math.ceil(maxWX / step);
 
   ctx.save();
-  for (let i = first; i <= last; i++) {
-    const jitter = (hash01(i, 21) - 0.5) * 2 * T.jitter;
-    const wx = i * T.spacing + jitter;
-    const heightM = lerp(T.minH, T.maxH, hash01(i, 22)); // total tree height
-    const variant = hash01(i, 23); // 0..1 -> canopy fullness (a little variety)
-
-    const cx = layerScreenX(camera, wx, T.factor);
-    const hpx = heightM * camera.ppm;
-    const trunkW = Math.max(2, hpx * 0.09);
-    const trunkH = hpx * 0.42; // trunk is the lower ~40% of the tree
-    const canopyR = hpx * lerp(0.34, 0.44, variant); // canopy radius, px
-    const canopyCy = groundY - trunkH - canopyR * 0.7; // canopy center
-
-    // Trunk (rounded-ish rect from the ground up).
-    ctx.fillStyle = T.trunkColor;
-    ctx.fillRect(cx - trunkW / 2, groundY - trunkH, trunkW, trunkH);
-
-    // Canopy = a couple of overlapping soft circles for a fuller silhouette.
-    ctx.fillStyle = T.canopyColor;
+  for (let n = firstN; n <= lastN; n++) {
+    const wx = n * step;
+    const isMajor = n % majorMod === 0;
+    const sx = Math.round(layerScreenX(camera, wx, 1)) + 0.5; // crisp 1px line
+    ctx.strokeStyle = isMajor ? G.majorColor : G.minorColor;
+    ctx.lineWidth = isMajor ? G.majorWidth : G.minorWidth;
     ctx.beginPath();
-    ctx.arc(cx, canopyCy, canopyR, 0, Math.PI * 2);
-    ctx.arc(cx - canopyR * 0.6, canopyCy + canopyR * 0.35, canopyR * 0.7, 0, Math.PI * 2);
-    ctx.arc(cx + canopyR * 0.6, canopyCy + canopyR * 0.35, canopyR * 0.7, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-/** Near bushes: low rounded clumps just in front of the trees. */
-function drawBushes(ctx, camera, B) {
-  const groundY = camera.worldToScreen(0, CONFIG.ground.y).y;
-  const { first, last } = visibleTiles(camera, B.factor, B.spacing, B.maxH * 2);
-
-  ctx.save();
-  ctx.fillStyle = B.color;
-  for (let i = first; i <= last; i++) {
-    const jitter = (hash01(i, 31) - 0.5) * 2 * B.jitter;
-    const wx = i * B.spacing + jitter;
-    const heightM = lerp(B.minH, B.maxH, hash01(i, 32));
-    const cx = layerScreenX(camera, wx, B.factor);
-    const r = heightM * camera.ppm; // clump radius, px
-
-    // A three-lobe rounded clump sitting on the ground line.
-    ctx.beginPath();
-    ctx.arc(cx, groundY - r * 0.5, r, 0, Math.PI * 2);
-    ctx.arc(cx - r * 0.8, groundY - r * 0.3, r * 0.75, 0, Math.PI * 2);
-    ctx.arc(cx + r * 0.8, groundY - r * 0.3, r * 0.75, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(sx, groundY);
+    ctx.lineTo(sx, topY);
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -294,7 +206,7 @@ export function drawDistanceMarkers(ctx, camera) {
 
     const sx = layerScreenX(camera, wx, 1); // real camera => exact ground x
     if (isStart) {
-      // START line: taller, tinted, with a small "START" cap.
+      // START line: taller, bold charcoal/sepia, with a small "START" cap.
       ctx.strokeStyle = S.startLineColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -309,7 +221,7 @@ export function drawDistanceMarkers(ctx, camera) {
       continue;
     }
 
-    // Regular tick dropping below the ground line; majors are longer/brighter.
+    // Regular tick dropping below the ground line; majors are longer/darker.
     const tickH = isMajor ? S.markerMajorTickH : S.markerTickH;
     ctx.strokeStyle = isMajor ? S.markerMajorColor : S.markerMinorColor;
     ctx.beginPath();
@@ -331,12 +243,12 @@ export function drawDistanceMarkers(ctx, camera) {
 }
 
 /**
- * drawMilestones(ctx, camera) — a little pennant flag every `interval` meters
- * (10m, 20m, …), a strong "how far have I come" cue on long walks. Each flag is
- * a thin pole rising from the ground line with a small triangular pennant near
- * its top, labelled with the distance. Pinned to fixed world x and drawn with
- * the REAL camera (factor 1) so the poles stand exactly on the ground and scroll
- * past with the world. Determinism: fixed world positions, no jitter/state.
+ * drawMilestones(ctx, camera) — an amber pennant flag every `interval` meters
+ * (10m, 20m, …), the ONE bold accent in the field (it echoes the UI's amber).
+ * Each flag is a thin pole rising from the ground line with a small triangular
+ * pennant near its top, labelled with the distance. Pinned to fixed world x and
+ * drawn with the REAL camera (factor 1) so the poles stand exactly on the ground
+ * and scroll past with the world. Determinism: fixed world positions, no state.
  */
 function drawMilestones(ctx, camera) {
   const S = CONFIG.scenery;
@@ -379,7 +291,7 @@ function drawMilestones(ctx, camera) {
     ctx.lineTo(sx, topY);
     ctx.stroke();
 
-    // Triangular pennant hanging off the top of the pole (points forward, +x).
+    // Triangular amber pennant hanging off the top of the pole (points +x).
     ctx.fillStyle = M.flagColor;
     ctx.beginPath();
     ctx.moveTo(sx, topY); // pole top
