@@ -112,7 +112,7 @@ export function drawParallax(ctx, camera) {
  * fixed world x (SUN.worldX) rather than tiled, so there's exactly one sun; the
  * tiny parallax `factor` still gives it a gentle drift so it reads as distant.
  * Sits high in the cell by a fraction of the cell height (like clouds' band),
- * and is a warm translucent circle with a couple of faint glow rings.
+ * and is a warm translucent disc with a smooth radial-gradient halo (no rings).
  */
 function drawSun(ctx, camera, SUN) {
   const oy = camera.offsetY || 0;
@@ -121,19 +121,21 @@ function drawSun(ctx, camera, SUN) {
   const r = SUN.radius * camera.ppm; // disc radius, px (meters × ppm)
 
   // Cull if the whole disc + its glow is off either side of the cell.
-  const glowR = r * 1.9; // outermost halo reach
+  const glowR = r * SUN.glowFrac; // outermost halo reach
   if (cx + glowR < 0 || cx - glowR > camera.viewW) return;
 
   ctx.save();
-  // A couple of concentric low-alpha rings for a soft halo, then the disc.
-  ctx.fillStyle = SUN.glowColor;
+  // Soft halo: ONE radial gradient warm at the disc edge, fading to transparent
+  // at glowR — a smooth falloff with no visible ring banding.
+  const halo = ctx.createRadialGradient(cx, cy, r, cx, cy, glowR);
+  halo.addColorStop(0, SUN.glowColor);
+  halo.addColorStop(1, SUN.glowEdgeColor);
+  ctx.fillStyle = halo;
   ctx.beginPath();
   ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.beginPath();
-  ctx.arc(cx, cy, r * 1.4, 0, Math.PI * 2);
-  ctx.fill();
 
+  // The solid warm disc on top.
   ctx.fillStyle = SUN.color;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);

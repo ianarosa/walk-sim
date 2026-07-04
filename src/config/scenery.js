@@ -45,7 +45,10 @@ export const sceneryConfig = Object.freeze({
       bandFrac: 0.34, // …and spans this fraction of the cell height
       minR: 0.9, // cloud lobe radius range, meters
       maxR: 1.7,
-      color: 'rgba(255,255,255,0.55)', // soft white blobs
+      // Near-opaque so a cloud OCCLUDES the sun (and anything else) it passes
+      // over instead of letting it bleed through. Still soft-white + rounded, so
+      // it reads as a cloud against the pink sky, not a hard disk.
+      color: 'rgba(255,255,255,0.92)',
     }),
     trees: Object.freeze({
       factor: 0.5, // mid layer, sweeps by noticeably
@@ -89,8 +92,10 @@ export const sceneryConfig = Object.freeze({
       worldX: 0, // fixed world-x anchor (single sun, not a repeating field)
       topFrac: 0.14, // vertical center as a fraction down the cell (high sky)
       radius: 2.2, // sun disc radius, meters (× ppm, like clouds' minR/maxR)
+      glowFrac: 1.5, // halo reach as a multiple of the disc radius (smaller = tighter)
       color: 'rgba(255,246,220,0.55)', // soft warm disc, translucent glass
-      glowColor: 'rgba(255,246,220,0.14)', // faint outer halo (low alpha)
+      glowColor: 'rgba(255,246,220,0.22)', // warm halo at the disc edge (fades out)
+      glowEdgeColor: 'rgba(255,246,220,0)', // fully transparent — halo's outer stop
     }),
   }),
 });
