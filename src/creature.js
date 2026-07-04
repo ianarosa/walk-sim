@@ -539,18 +539,25 @@ export function defaultQuadruped() {
 }
 
 /**
- * defaultCrawler() — a worm/snake: a horizontal CHAIN of 5 segments lying on
- * the ground (all cells at cy=0), linked by motorized revolute joints. Placing
- * a joint on every shared edge breaks fusion, so the row becomes 5 separate
- * bodies that can undulate. Limits ~±0.9 rad let it flex into an S and crawl.
+ * defaultCrawler() — a worm/snake: a horizontal CHAIN of 7 segments lying on
+ * the ground (all cells at cy=0), linked by 6 motorized revolute joints.
+ * Placing a joint on every shared edge breaks fusion, so the row becomes 7
+ * separate bodies that can undulate. Limits ~±1.0 rad let it flex into an S.
  *
- *   (0,0)-(1,0)-(2,0)-(3,0)-(4,0)      root = middle (2,0); ends are isFoot
+ *   (0,0)-(1,0)-(2,0)-(3,0)-(4,0)-(5,0)-(6,0)   root = middle (3,0)
+ *                                                ends (0,0),(6,0) are isFoot
  *
- * The two END segments are flagged isFoot (ground-contact obs + extra grip) so
- * the worm can anchor an end and drag itself forward.
+ * WHY IT MOVES NOW (was: it just whipped in place):
+ *   The bottleneck was never torque — a 0.3m box at density 1 is ~0.09 kg, so
+ *   the old 60 N·m already over-drove those near-weightless links. What was
+ *   missing was MASS + TRACTION: light segments undulate but don't grip the
+ *   floor, so no net thrust. We fix all three: it's LONGER (more contact and
+ *   more phase for a travelling wave), HEAVIER + grippier on the mid-body (so
+ *   pushes react against real inertia instead of flinging weightless links),
+ *   and stronger torque to match the added mass.
  */
 export function defaultCrawler() {
-  const n = 5;
+  const n = 7;
   const cells = [];
   const joints = [];
   for (let i = 0; i < n; i++) cells.push([i, 0]);
@@ -558,20 +565,34 @@ export function defaultCrawler() {
     joints.push({
       a: [i, 0],
       b: [i + 1, 0],
-      lowerAngle: -0.9,
-      upperAngle: 0.9,
-      maxMotorTorque: 60,
+      lowerAngle: -1.0,
+      upperAngle: 1.0,
+      // Ample torque for the now-heavier body; motor still eases in via limits.
+      maxMotorTorque: 120,
       motorized: true,
     });
   }
-  return creatureFromGrid({
+  const worm = creatureFromGrid({
     name: 'Default Worm',
     cellSize: 0.3,
     cells,
     joints,
-    roots: [[2, 0]], // middle segment
+    roots: [[3, 0]], // middle segment
     feet: [[0, 0], [n - 1, 0]], // the two ends
   });
+
+  // Post-process MASS + GRIP. creatureFromGrid gives non-foot bodies the light
+  // 1.0/0.6 default; that's what left the worm weightless and slippery. Beef up
+  // every NON-foot (mid-body) segment so the motors have real inertia to push
+  // against and enough friction to convert undulation into forward travel. The
+  // two end "feet" keep creatureFromGrid's grippier 2.0/0.95 for anchoring.
+  for (const b of worm.bodies) {
+    if (!b.isFoot) {
+      b.density = 3.0;
+      b.friction = 0.9;
+    }
+  }
+  return validateCreature(worm);
 }
 
 /**
