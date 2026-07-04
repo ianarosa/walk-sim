@@ -109,8 +109,13 @@ registerPanel({
         // `workers` is the live shard count (undefined on any non-worker path).
         const w = t && t.workers != null ? t.workers : undefined;
         const wStr = w != null ? ` · ${w}w` : '';
+        // Best net-forward distance ever reached — the clearest "how good is this
+        // walker" signal. Guard for undefined/NaN so we simply omit it when absent.
+        const best = t ? t.bestDistance : undefined;
+        const bestStr =
+          typeof best === 'number' && isFinite(best) ? ` · best ${best.toFixed(1)}m` : '';
         valSps.textContent = sps
-          ? `training: ${Math.round(sps).toLocaleString()} steps/s · ${inst} envs${wStr}`
+          ? `training: ${Math.round(sps).toLocaleString()} steps/s · ${inst} envs${wStr}${bestStr}`
           : 'training: warming up…';
       });
     }
@@ -157,6 +162,16 @@ registerPanel({
           ctx.refresh();
         });
 
+        // Point-in-time best-distance snapshot for THIS lane (the list is only
+        // rebuilt on ctx.refresh(), so no per-frame wiring here — keep it cheap).
+        const dist = document.createElement('span');
+        dist.className = 'lane-dist';
+        dist.style.cssText = 'opacity:.7;font-variant-numeric:tabular-nums';
+        const best = lane.trainer && lane.trainer.bestDistance;
+        dist.textContent =
+          typeof best === 'number' && isFinite(best) ? `${best.toFixed(1)}m` : '';
+        dist.title = 'Best net-forward distance reached';
+
         const exploit = document.createElement('label');
         exploit.className = 'lane-exploit';
         exploit.title = 'Exploit: show the best gait (no exploration)';
@@ -188,6 +203,7 @@ registerPanel({
         });
 
         row.appendChild(name);
+        row.appendChild(dist);
         row.appendChild(exploit);
         row.appendChild(reset);
         row.appendChild(del);
