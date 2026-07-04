@@ -64,5 +64,33 @@ export const sceneryConfig = Object.freeze({
       maxH: 0.6,
       color: 'rgba(120,200,150,0.5)', // stronger green, close = more opaque
     }),
+
+    // --- Feature 1b: milestone flags (a strong progress cue every N meters) ---
+    // Pennant flags pinned to fixed world x every `interval` meters, drawn with
+    // the REAL camera (factor 1) so their poles stand exactly on the ground line.
+    // Sizes are in meters (× ppm at draw time) so they scale with the creature,
+    // matching how trees/bushes are sized.
+    milestones: Object.freeze({
+      interval: 10, // meters between milestone flags (10m, 20m, 30m…)
+      poleH: 1.6, // pole height above the ground line, meters
+      flagW: 0.7, // flag triangle width (from pole outward), meters
+      flagH: 0.5, // flag triangle height, meters
+      poleColor: 'rgba(60,70,110,0.55)', // thin muted pole, reads on pastel sky
+      flagColor: 'rgba(120,180,255,0.7)', // tinted pennant, echoes the START line
+      labelColor: 'rgba(30,40,80,0.7)', // "10m" text, bolder than minor labels
+      labelFont: '600 11px system-ui, sans-serif', // slightly bold + larger
+    }),
+
+    // --- Feature 2b: a single soft SUN, the furthest parallax layer ---
+    // Anchored to a fixed world x so there is exactly ONE sun; the tiny `factor`
+    // still gives it a barely-perceptible drift so it reads as very distant.
+    sun: Object.freeze({
+      factor: 0.03, // near-pinned drift — furthest thing in the scene
+      worldX: 0, // fixed world-x anchor (single sun, not a repeating field)
+      topFrac: 0.14, // vertical center as a fraction down the cell (high sky)
+      radius: 2.2, // sun disc radius, meters (× ppm, like clouds' minR/maxR)
+      color: 'rgba(255,246,220,0.55)', // soft warm disc, translucent glass
+      glowColor: 'rgba(255,246,220,0.14)', // faint outer halo (low alpha)
+    }),
   }),
 });

@@ -100,10 +100,45 @@ function visibleTiles(camera, factor, spacing, marginM) {
  * ======================================================================== */
 export function drawParallax(ctx, camera) {
   const S = CONFIG.scenery;
+  drawSun(ctx, camera, S.sun); // furthest of all — behind the hills
   drawHills(ctx, camera, S.hills);
   drawClouds(ctx, camera, S.clouds);
   drawTrees(ctx, camera, S.trees);
   drawBushes(ctx, camera, S.bushes);
+}
+
+/**
+ * A SINGLE soft sun disc, the furthest layer of all. It is anchored to one
+ * fixed world x (SUN.worldX) rather than tiled, so there's exactly one sun; the
+ * tiny parallax `factor` still gives it a gentle drift so it reads as distant.
+ * Sits high in the cell by a fraction of the cell height (like clouds' band),
+ * and is a warm translucent circle with a couple of faint glow rings.
+ */
+function drawSun(ctx, camera, SUN) {
+  const oy = camera.offsetY || 0;
+  const cx = layerScreenX(camera, SUN.worldX, SUN.factor); // near-pinned drift
+  const cy = oy + camera.viewH * SUN.topFrac; // high-sky vertical spot
+  const r = SUN.radius * camera.ppm; // disc radius, px (meters × ppm)
+
+  // Cull if the whole disc + its glow is off either side of the cell.
+  const glowR = r * 1.9; // outermost halo reach
+  if (cx + glowR < 0 || cx - glowR > camera.viewW) return;
+
+  ctx.save();
+  // A couple of concentric low-alpha rings for a soft halo, then the disc.
+  ctx.fillStyle = SUN.glowColor;
+  ctx.beginPath();
+  ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = SUN.color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 /** Far hills: soft rounded mounds sitting on the ground line, two tinted rows. */
@@ -285,6 +320,76 @@ export function drawDistanceMarkers(ctx, camera) {
       const meters = Math.round(wx); // majors land on whole meters by design
       ctx.fillStyle = S.markerLabelColor;
       ctx.fillText(`${meters}m`, sx, groundY + tickH + 12);
+    }
+  }
+  ctx.restore();
+
+  // Milestone pennants on top of the ground band (still behind the creature).
+  drawMilestones(ctx, camera);
+}
+
+/**
+ * drawMilestones(ctx, camera) — a little pennant flag every `interval` meters
+ * (10m, 20m, …), a strong "how far have I come" cue on long walks. Each flag is
+ * a thin pole rising from the ground line with a small triangular pennant near
+ * its top, labelled with the distance. Pinned to fixed world x and drawn with
+ * the REAL camera (factor 1) so the poles stand exactly on the ground and scroll
+ * past with the world. Determinism: fixed world positions, no jitter/state.
+ */
+function drawMilestones(ctx, camera) {
+  const S = CONFIG.scenery;
+  const M = S.milestones;
+  const groundY = camera.worldToScreen(0, CONFIG.ground.y).y;
+
+  // Same visible world-x span math as the markers above (real camera, factor 1).
+  const halfW = camera.viewW / 2 / camera.ppm;
+  const minWX = camera.focusX - halfW;
+  const maxWX = camera.focusX + halfW;
+
+  // Only the label text is gated by zoom; the pole+flag always draw.
+  const detailed = camera.ppm >= S.markerLabelMinPPM;
+
+  // Pole/flag sizes are meters × ppm so they scale with the creature.
+  const poleH = M.poleH * camera.ppm; // pole height above the ground, px
+  const flagW = M.flagW * camera.ppm; // pennant width (pole → tip), px
+  const flagH = M.flagH * camera.ppm; // pennant height, px
+
+  // Walk the whole-`interval` multiples across the visible span (bounded loop).
+  const firstN = Math.floor(minWX / M.interval);
+  const lastN = Math.ceil(maxWX / M.interval);
+
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.font = M.labelFont;
+
+  for (let n = firstN; n <= lastN; n++) {
+    if (n <= 0) continue; // skip x=0 (the START line owns it) and anything behind
+    const wx = n * M.interval;
+    const sx = layerScreenX(camera, wx, 1); // real camera => exact ground x
+    const topY = groundY - poleH; // top of the pole
+
+    // Thin vertical pole rising from the ground line.
+    ctx.strokeStyle = M.poleColor;
+    ctx.beginPath();
+    ctx.moveTo(sx, groundY);
+    ctx.lineTo(sx, topY);
+    ctx.stroke();
+
+    // Triangular pennant hanging off the top of the pole (points forward, +x).
+    ctx.fillStyle = M.flagColor;
+    ctx.beginPath();
+    ctx.moveTo(sx, topY); // pole top
+    ctx.lineTo(sx + flagW, topY + flagH * 0.5); // outward tip
+    ctx.lineTo(sx, topY + flagH); // back to pole
+    ctx.closePath();
+    ctx.fill();
+
+    // Distance label above the pennant, in a slightly bolder/tinted style.
+    if (detailed) {
+      ctx.fillStyle = M.labelColor;
+      ctx.fillText(`${Math.round(wx)}m`, sx, topY - 4);
     }
   }
   ctx.restore();
