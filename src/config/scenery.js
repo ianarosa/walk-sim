@@ -30,6 +30,28 @@ export const sceneryConfig = Object.freeze({
     startLineTickH: 26, // px the start line extends below the ground
     markerLabelMinPPM: 30, // hide labels+minor ticks when a cell is too zoomed out
 
+    // --- Level-of-detail (LOD): scale parallax cost to CELL SIZE -----------
+    // `lanes.draw()` paints drawParallax for EVERY lane EVERY frame, each with
+    // that cell's camera.ppm (pixels-per-meter). A single fullscreen lane has a
+    // BIG ppm (~60); a 6–12 lane grid packs tiny cells whose ppm is small, where
+    // trees/bushes/clouds are sub-pixel clutter drawn at full cost. These cutoffs
+    // let each scenery layer EARLY-RETURN once the cell is too small for it to
+    // read, so tiny grid cells only pay for the cheap far backdrop (sun+hills).
+    //
+    // TIERS (per layer, so it degrades gracefully as cells shrink):
+    //   ppm >= bushesMinPPM      -> FULL: sun+hills+clouds+BOTH tree rows+bushes
+    //   ppm in [treesMinPPM,·)   -> MEDIUM: sun+hills+clouds+ONE (front) tree row
+    //   ppm <  treesMinPPM       -> TINY: sun+hills only (clouds/trees/bushes off)
+    // Sun + hills have NO cutoff — they're the cheap backdrop and always draw.
+    // Cutoffs sit well below a single lane's ppm (~60) so a focused/large lane is
+    // visually IDENTICAL to before; only shrunken grid cells lose detail. Tunable.
+    lod: Object.freeze({
+      bushesMinPPM: 45, // draw near BUSHES only in near-full-size cells
+      treesBackMinPPM: 45, // draw the 2nd (back) TREE row only at full detail
+      treesMinPPM: 22, // draw ANY trees (front row) only above this
+      cloudsMinPPM: 22, // draw CLOUDS only above this (else sub-pixel puffs)
+    }),
+
     // --- Feature 2: parallax landscape (drawn back-to-front) ---------------
     // Each layer: parallax `factor` (smaller = further/slower drift), world
     // `spacing` (m) of its repeating field, and a per-tile `jitter` (m) so the

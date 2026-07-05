@@ -107,11 +107,15 @@ function visibleTiles(camera, factor, spacing, marginM) {
  * ======================================================================== */
 export function drawParallax(ctx, camera) {
   const S = CONFIG.scenery;
-  drawSun(ctx, camera, S.sun); // furthest of all — behind the hills
-  drawHills(ctx, camera, S.hills); // overlapping tonal bands
-  drawClouds(ctx, camera, S.clouds); // sparse bold puffy outlined cumulus
-  drawTrees(ctx, camera, S.trees); // two irregular depth rows
-  drawBushes(ctx, camera, S.bushes); // low flat clumps
+  // LOD: each near layer early-returns when camera.ppm (a proxy for cell size)
+  // drops below its cutoff in CONFIG.scenery.lod, so tiny multi-lane grid cells
+  // only pay for the cheap far backdrop. Sun + hills always draw; clouds/trees/
+  // bushes progressively drop out as cells shrink. See config/scenery.js `lod`.
+  drawSun(ctx, camera, S.sun); // furthest of all — behind the hills (always)
+  drawHills(ctx, camera, S.hills); // overlapping tonal bands (always)
+  drawClouds(ctx, camera, S.clouds); // sparse bold puffy cumulus (>= cloudsMinPPM)
+  drawTrees(ctx, camera, S.trees); // two depth rows -> one -> none as cells shrink
+  drawBushes(ctx, camera, S.bushes); // low flat clumps (>= bushesMinPPM only)
 }
 
 /**
@@ -215,6 +219,8 @@ function drawHills(ctx, camera, H) {
  * A sparsity gate keeps these bold clouds from tiling densely.
  */
 function drawClouds(ctx, camera, C) {
+  // LOD: in tiny grid cells clouds are sub-pixel puffs — skip the whole layer.
+  if (camera.ppm < CONFIG.scenery.lod.cloudsMinPPM) return;
   const oy = camera.offsetY || 0;
   const bandTop = oy + camera.viewH * C.topFrac; // sky band, as cell fractions
   const bandH = camera.viewH * C.bandFrac;
@@ -323,9 +329,13 @@ function cumulusLobes(i, cx, cy, w, h) {
  * back row is smaller/paler and set behind; the front row is larger/darker.
  */
 function drawTrees(ctx, camera, T) {
+  const LOD = CONFIG.scenery.lod;
+  // LOD: below treesMinPPM the cell is too small for any trees to read — skip.
+  if (camera.ppm < LOD.treesMinPPM) return;
   ctx.save();
-  // Draw the paler BACK row first, then the darker FRONT row on top.
-  drawTreeRow(ctx, camera, T, T.back, 0);
+  // Draw the paler BACK row first, then the darker FRONT row on top — but drop
+  // the back row in medium cells (its second pass is barely visible there).
+  if (camera.ppm >= LOD.treesBackMinPPM) drawTreeRow(ctx, camera, T, T.back, 0);
   drawTreeRow(ctx, camera, T, T.front, 100);
   ctx.restore();
 }
@@ -409,6 +419,9 @@ function drawTreeRow(ctx, camera, T, row, saltBase) {
  * height and a sparsity gate, so they scatter rather than line up.
  */
 function drawBushes(ctx, camera, B) {
+  // LOD: bushes are the nearest, smallest clutter — only worth it in near-full
+  // cells; below the cutoff they'd be a couple of sub-pixel specks. Skip them.
+  if (camera.ppm < CONFIG.scenery.lod.bushesMinPPM) return;
   const groundY = camera.worldToScreen(0, CONFIG.ground.y).y;
   const { first, last } = visibleTiles(camera, B.factor, B.spacing, B.maxW);
 
