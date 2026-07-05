@@ -111,7 +111,10 @@ registerPanel({
     }
 
     // ---- Training throughput readout (focused lane), refreshed per frame ----
+    // This runs EVERY frame, so cache the last rendered string and only touch
+    // the DOM (textContent) when it actually changes — most frames it doesn't.
     if (valSps) {
+      let lastSpsStr = null;
       ctx.onFrame(() => {
         const lane = ctx.lanes.focusedLane();
         const t = lane && lane.trainer;
@@ -125,9 +128,13 @@ registerPanel({
         const best = t ? t.bestDistance : undefined;
         const bestStr =
           typeof best === 'number' && isFinite(best) ? ` · best ${best.toFixed(1)}m` : '';
-        valSps.textContent = sps
+        const str = sps
           ? `training: ${Math.round(sps).toLocaleString()} steps/s · ${inst} envs${wStr}${bestStr}`
           : 'training: warming up…';
+        if (str !== lastSpsStr) {
+          valSps.textContent = str;
+          lastSpsStr = str;
+        }
       });
     }
 
@@ -218,7 +225,6 @@ registerPanel({
         // rebuilt on ctx.refresh(), so no per-frame wiring here — keep it cheap).
         const dist = document.createElement('span');
         dist.className = 'lane-dist';
-        dist.style.cssText = 'opacity:.7;font-variant-numeric:tabular-nums';
         const best = lane.trainer && lane.trainer.bestDistance;
         dist.textContent =
           typeof best === 'number' && isFinite(best) ? `${best.toFixed(1)}m` : '';
@@ -254,12 +260,25 @@ registerPanel({
           ctx.refresh();
         });
 
-        row.appendChild(laneIdx);
-        row.appendChild(name);
-        row.appendChild(dist);
-        row.appendChild(exploit);
-        row.appendChild(reset);
-        row.appendChild(del);
+        // Two-line row. TOP line reads as the list item — trial index, the
+        // readable lane NAME, and the best-distance measurement right-aligned.
+        // BOTTOM line is the control cluster — exploit toggle + reset + delete —
+        // so the name never has to fight the buttons for width (the old single
+        // line crushed the name down to "DE…").
+        const top = document.createElement('div');
+        top.className = 'lane-main';
+        top.appendChild(laneIdx);
+        top.appendChild(name);
+        top.appendChild(dist);
+
+        const controls = document.createElement('div');
+        controls.className = 'lane-controls';
+        controls.appendChild(exploit);
+        controls.appendChild(reset);
+        controls.appendChild(del);
+
+        row.appendChild(top);
+        row.appendChild(controls);
         laneList.appendChild(row);
       }
     };

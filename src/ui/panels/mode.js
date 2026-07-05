@@ -81,7 +81,7 @@ registerPanel({
         <span class="plate-idx">Pl. 07</span>
       </div>
       <h1>walk<span>-sim</span></h1>
-      <p class="sub">Draw a creature, limit its joints, and watch a fleet of them learn to walk — each falls, resets to the start line, and tries again.</p>
+      <p class="sub">Draw a creature, then watch a fleet learn to walk.</p>
       <div class="row">
         <button id="btn-mode-train" type="button" class="active">Train</button>
         <button id="btn-mode-editor" type="button">Editor</button>

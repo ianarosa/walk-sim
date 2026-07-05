@@ -131,7 +131,8 @@
       outline-offset: -5px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      /* Match the 10px inter-section gap so the whole plate shares one rhythm. */
+      gap: 10px;
       user-select: none;
     }
 
@@ -221,11 +222,13 @@
       color: var(--text);
     }
     #sidebar h1 span { color: var(--accent); }
+    /* One-line tagline — snug under the wordmark; parent gap sets the space
+       below it, so it carries no bottom margin of its own. */
     .sub {
-      margin: -2px 0 2px;
-      font-size: 12px;
+      margin: -3px 0 0;
+      font-size: 11.5px;
       color: var(--muted);
-      line-height: 1.5;
+      line-height: 1.4;
     }
 
     .row { display: flex; gap: 8px; }
@@ -365,7 +368,17 @@
       border: 1px solid var(--hairline);
       border-radius: var(--radius-sm); padding: 6px;
     }
+    /* A lane row is a two-line list item: a NAME line above a CONTROL line, so
+       the name reads in full instead of being crushed by the buttons. (slot-row
+       keeps the single-line base above.) */
+    .lane-row {
+      flex-direction: column; align-items: stretch; gap: 6px; padding: 8px;
+    }
     .lane-row.focused { border-color: var(--accent); background: var(--amber-wash); }
+    /* Top line: index · name (grows) · best-distance (right-aligned). */
+    .lane-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    /* Bottom line: exploit toggle on the left, reset + delete pushed right. */
+    .lane-controls { display: flex; align-items: center; gap: 6px; }
     /* Zero-padded trial index (mono, amber) — reads as a plate figure number. */
     .lane-idx {
       flex: 0 0 auto;
@@ -379,6 +392,15 @@
       white-space: nowrap; padding: 6px 8px; font-weight: 700; font-size: 12px;
       letter-spacing: 0.04em;
     }
+    /* The lane name is a title, not a boxed button — strip the button chrome so
+       the top line reads as clean text; keep it focusable + hover-hinted. */
+    .lane-name {
+      min-width: 0; background: transparent; border-color: transparent;
+      padding: 2px 4px; font-size: 12.5px;
+    }
+    .lane-name:hover {
+      background: rgba(247, 240, 230, 0.10); transform: none; color: var(--accent);
+    }
     /* Best-distance readout — a measurement: mono, muted, trailing "m". */
     .lane-dist {
       flex: 0 0 auto;
@@ -386,7 +408,12 @@
       font-size: 11px; color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
-    .lane-exploit { flex: 0 0 auto; gap: 4px; font-size: 11px; }
+    /* Exploit toggle sits at the left of the control line; margin-right:auto
+       shoves the reset/delete icon buttons to the right edge. */
+    .lane-exploit {
+      flex: 0 0 auto; gap: 4px; font-size: 11px;
+      justify-content: flex-start; margin-right: auto;
+    }
     .lane-exploit input { width: 14px; height: 14px; }
     .muted-line { font-size: 11.5px; color: var(--muted); padding: 4px 2px; }
     /* Training throughput readout — telemetry, so set it in mono. */
