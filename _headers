@@ -1,0 +1,17 @@
+# Cloudflare Pages cache rules (https://developers.cloudflare.com/pages/configuration/headers/).
+#
+# WHY THIS EXISTS: the app is served from stable, un-hashed URLs (index.html
+# imports ./src/*.js directly — there's no build step to fingerprint filenames).
+# Cloudflare's default cache on static .js is `max-age=14400` (4h), so after a
+# deploy the browser kept running the OLD modules on a normal refresh until that
+# expired — only a hard refresh (Ctrl+Shift+R) picked up the new code.
+#
+# FIX: force revalidation on every load. The browser may still cache, but it must
+# re-check with the server (via ETag) before reusing a file — so it gets a cheap
+# 304 Not Modified when nothing changed, and the fresh file the instant a deploy
+# changes it. A normal refresh now always shows the latest. (index.html already
+# ships max-age=0 by default; these are the modules that were sticking.)
+/src/*
+  Cache-Control: public, max-age=0, must-revalidate
+/vendor/*
+  Cache-Control: public, max-age=0, must-revalidate
