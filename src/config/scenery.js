@@ -108,26 +108,27 @@ export const sceneryConfig = Object.freeze({
       ],
     }),
 
-    // CLOUDS: sparse, BOLD PUFFY CARTOON CUMULUS (comic/sticker style). Each
-    // cloud is several overlapping CIRCLE lobes — a bumpy rounded multi-lobe top
-    // over a flatter bottom — wrapped in ONE clean dark outer OUTLINE (drawn by
-    // the inflated-silhouette two-pass technique in src/scenery.js). White body,
-    // slate outline. Bumpy tops/sizes are hashed per cloud so no two match.
+    // CLOUDS: sparse, SOFT PUFFY CUMULUS in the same FLAT CUT-PAPER language as
+    // the hills/trees — NOT comic stickers. Each cloud is several overlapping
+    // CIRCLE lobes (bumpy multi-lobe top over a flatter bottom) filled as ONE
+    // soft, semi-transparent off-white mass — NO hard outline. A faint cool
+    // blue-grey UNDERSIDE shade (the same lobes nudged down a hair, echoing the
+    // dusty-blue hill band) gives a whisper of cut-paper depth, matching the
+    // trees' subtle inner lobe. Bumpy tops/sizes are hashed so no two match.
     clouds: Object.freeze({
       factor: 0.08, // furthest-feeling drift (sky)
       spacing: 11.0, // meters between candidate cloud slots
       jitter: 3.0, // ± meters stable jitter
-      density: 0.5, // fraction of slots that get a cloud (bold => keep it sparse)
+      density: 0.5, // fraction of slots that get a cloud (keep the sky sparse)
       topFrac: 0.1, // cloud band starts this fraction down the cell
       bandFrac: 0.28, // …and spans this fraction of the cell height (vertical spread)
       minW: 2.6, // overall cloud width range, meters
       maxW: 5.6,
       minH: 1.2, // overall cloud height range, meters (puffy, taller than stratus)
       maxH: 1.9,
-      outlineFrac: 0.06, // outline band thickness as a fraction of cloud height
-      bodyColor: 'rgba(250,250,252,0.96)', // near-opaque white cloud body
-      outlineColor: 'rgba(38,44,58,0.9)', // bold dark slate/navy outer outline
-      accentColor: 'rgba(38,44,58,0.22)', // faint interior seam hints near the top
+      shadeFrac: 0.09, // underside-shade offset as a fraction of cloud height (soft, no outline)
+      bodyColor: 'rgba(245,241,231,0.7)', // soft warm off-white, flat + semi-transparent
+      shadeColor: 'rgba(118,132,154,0.2)', // cool dusty blue-grey underside (echoes the hills)
     }),
 
     // TREES: two irregular depth ROWS of varied two-form silhouettes — a rounded

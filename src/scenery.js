@@ -201,22 +201,20 @@ function drawHills(ctx, camera, H) {
 }
 
 /**
- * CLOUDS — BOLD PUFFY CARTOON CUMULUS with a clean dark OUTER OUTLINE (comic /
- * sticker style). Each cloud is several overlapping CIRCLE lobes (see
- * cumulusLobes): a bumpy rounded multi-lobe top over a flatter bottom.
+ * CLOUDS — SOFT PUFFY CUMULUS in the same FLAT CUT-PAPER register as the rest of
+ * the scenery (no comic outline). Each cloud is several overlapping CIRCLE lobes
+ * (see cumulusLobes): a bumpy rounded multi-lobe top over a flatter bottom.
  *
- * The outline is the key to the look, and we get it WITHOUT stroking any circle
- * (which would leave messy internal arcs). Instead we use the INFLATED-SILHOUETTE
- * technique, TWO union fills per cloud:
- *   Pass 1 (outline): fill every lobe circle at radius (r + outlineW) — unioned
- *     in ONE path — with the dark slate color. This is a single blob slightly
- *     larger than the cloud.
+ * TWO union fills per cloud, drawn back-to-front:
+ *   Pass 1 (underside shade): fill every lobe circle at radius r — unioned in ONE
+ *     path, but NUDGED DOWN by shadeOff — with a soft cool blue-grey. The body
+ *     then covers all but a thin band along the bottom, giving a gentle cut-paper
+ *     underside shadow (like the trees' darker inner lobe) instead of an outline.
  *   Pass 2 (body): fill every lobe circle at radius r — unioned in ONE path —
- *     with white. The white covers the interior, so the dark shows ONLY as a
- *     crisp band around the whole outer silhouette. No internal seams.
+ *     with a soft, semi-transparent off-white, so the lobes fuse into one soft
+ *     mass that sits in the same muted, flat register as the hills and trees.
  * Each union is one path filled once, so overlapping lobes never double-darken.
- * A couple of SHORT, faint interior arcs then hint at lobe seams near the top.
- * A sparsity gate keeps these bold clouds from tiling densely.
+ * A sparsity gate keeps the sky from tiling densely.
  */
 function drawClouds(ctx, camera, C) {
   // LOD: in tiny grid cells clouds are sub-pixel puffs — skip the whole layer.
@@ -235,23 +233,26 @@ function drawClouds(ctx, camera, C) {
     const cy = bandTop + hash01(i, 42) * bandH; // stable vertical anchor in the band
     const w = lerp(C.minW, C.maxW, hash01(i, 43)) * camera.ppm; // overall width, px
     const h = lerp(C.minH, C.maxH, hash01(i, 44)) * camera.ppm; // overall height, px
-    const outlineW = h * C.outlineFrac; // dark band thickness, px (scales with size)
+    const shadeOff = h * C.shadeFrac; // underside-shade drop, px (scales with size)
 
     // Build this cloud's cumulus lobes (deterministic per tile).
-    const { lobes, nBase } = cumulusLobes(i, cx, cy, w, h);
+    const { lobes } = cumulusLobes(i, cx, cy, w, h);
 
-    // PASS 1 — OUTLINE: union every (r+outlineW) circle in ONE path, fill once,
-    // so a single clean dark blob sits slightly larger than the cloud (no seams).
-    ctx.fillStyle = C.outlineColor;
+    // PASS 1 — UNDERSIDE SHADE: the same lobe union nudged DOWN a hair, filled
+    // with a soft cool blue-grey. The body (next pass) covers all but a thin band
+    // along the bottom, so it reads as a gentle cut-paper underside shadow — no
+    // hard outline — matching the flat, muted hills/trees.
+    ctx.fillStyle = C.shadeColor;
     ctx.beginPath();
     for (const L of lobes) {
-      ctx.moveTo(L.x + L.r + outlineW, L.y); // fresh subpath (no chord between lobes)
-      ctx.arc(L.x, L.y, L.r + outlineW, 0, Math.PI * 2);
+      ctx.moveTo(L.x + L.r, L.y + shadeOff); // fresh subpath (no chord between lobes)
+      ctx.arc(L.x, L.y + shadeOff, L.r, 0, Math.PI * 2);
     }
     ctx.fill();
 
-    // PASS 2 — BODY: union every r circle in ONE path, fill white once. The white
-    // covers the interior, leaving the dark showing ONLY as a crisp outer band.
+    // PASS 2 — BODY: union every r circle in ONE path, fill soft off-white once.
+    // Semi-transparent + flat, so overlapping lobes fuse into one soft mass and
+    // the cloud sits in the same flat cut-paper register as the rest of the scene.
     ctx.fillStyle = C.bodyColor;
     ctx.beginPath();
     for (const L of lobes) {
@@ -259,19 +260,6 @@ function drawClouds(ctx, camera, C) {
       ctx.arc(L.x, L.y, L.r, 0, Math.PI * 2);
     }
     ctx.fill();
-
-    // A couple of SHORT, faint interior arcs on the lobes flanking center — a
-    // subtle hint of lobe seams near the top, kept few + faint so it stays clean.
-    ctx.strokeStyle = C.accentColor;
-    ctx.lineWidth = Math.max(1, outlineW * 0.55);
-    const mid = Math.floor(nBase / 2);
-    for (const k of [mid - 1, mid + 1]) {
-      if (k < 0 || k >= nBase) continue;
-      const L = lobes[k];
-      ctx.beginPath();
-      ctx.arc(L.x, L.y, L.r * 0.86, Math.PI * 1.15, Math.PI * 1.85); // short top cap
-      ctx.stroke();
-    }
   }
   ctx.restore();
 }
