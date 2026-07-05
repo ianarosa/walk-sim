@@ -153,11 +153,12 @@ export function observe(sim, limits) {
  * un-twitchy. Speed + distance + smoothness dominate; balance is a floor, not a
  * ceiling. All knobs come from CONFIG.RL.
  *
- * done when the root falls below fallHeight or tilts past maxTilt — so falling
+ * done when the root falls below fallHeight, tilts past maxTilt, or a body rears
+ * far above its rest height (the anti-curl gate — see stepWith) — so falling
  * early directly costs distance (FURTHEST). The step-timeout is OFF by default
- * (CONFIG.RL.maxEpisodeSteps = 0): episodes end ONLY on a fall/tilt, letting a
- * good walker run indefinitely. It re-enables as a hard per-episode step cap
- * only if maxEpisodeSteps is set > 0.
+ * (CONFIG.RL.maxEpisodeSteps = 0): episodes otherwise end only on those failure
+ * gates, letting a good FLAT walker run indefinitely. It re-enables as a hard
+ * per-episode step cap only if maxEpisodeSteps is set > 0.
  */
 export class Env {
   constructor(sim) {
@@ -195,6 +196,11 @@ export class Env {
     const hScale = p.y / rl.refHeight;
     this.fallHeight = rl.fallHeight * hScale;     // effective fall gate for THIS creature
     this.targetHeight = rl.targetHeight * hScale; // effective height-penalty target
+    // Per-body REST heights, for the anti-curl termination gate in stepWith().
+    // Sampled right after the rebuild (rest pose, before physics settles), so
+    // each body's baseline is its designed on-ground height.
+    this.restY = {};
+    for (const [id, b] of this.sim.bodies) this.restY[id] = b.getPosition().y;
     return observe(this.sim, this.limits);
   }
 
@@ -280,11 +286,28 @@ export class Env {
     const fell = pos.y < this.fallHeight; // per-creature effective fall gate from reset()
     const toppled = Math.abs(ang) > rl.maxTilt;
     // Step-timeout is OFF when maxEpisodeSteps <= 0 (the default): episodes end
-    // ONLY on a fall/tilt, so a good walker can run indefinitely. It re-enables
-    // as a hard per-episode step cap only if that config is set > 0.
+    // ONLY on a failure gate, so a good FLAT walker can run indefinitely. It
+    // re-enables as a hard per-episode step cap only if that config is set > 0.
     const timeout =
       rl.maxEpisodeSteps > 0 && this.stepInEpisode >= rl.maxEpisodeSteps;
-    const done = fell || toppled || timeout;
+
+    // Anti-curl gate: a body that rears far ABOVE its own rest height means the
+    // creature has contorted/reared rather than locomoting along the ground —
+    // e.g. a worm curling into a "scorpion" and scooting on one joint (segments
+    // rise to ~0.9m from a ~0.15m rest). Treat that like a fall so the policy is
+    // pushed toward flat, whole-body gaits. It uses each body's OWN rest height
+    // (captured in reset()), so it's morphology-agnostic: a biped's torso/legs
+    // stay within curlMargin of rest during a normal step. Off when curlMargin<=0.
+    let curled = false;
+    if (rl.curlMargin > 0 && this.restY) {
+      for (const [id, b] of this.sim.bodies) {
+        if (b.getPosition().y > this.restY[id] + rl.curlMargin) {
+          curled = true;
+          break;
+        }
+      }
+    }
+    const done = fell || toppled || timeout || curled;
 
     return {
       obs: observe(this.sim, this.limits),

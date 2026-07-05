@@ -45,6 +45,11 @@ export const rlConfig = Object.freeze({
                      // lies on the floor at ~0.15 m) scale BOTH gates by restY/refHeight so
                      // a low creature isn't judged "fallen" the instant it spawns. See env.js.
     maxTilt: 1.0, // |rootAngle| above this (rad) => toppled
+    curlMargin: 0.45, // ANTI-CURL gate (m): if any body rears more than this ABOVE
+                      // its own rest height, the episode ends like a fall. Stops the
+                      // "scorpion" cheat where a worm curls its body up and scoots on
+                      // one joint instead of crawling flat. Per-body-rest-relative, so
+                      // a biped's normal step (foot lifts < this) is unaffected. 0 = off.
     // Reward shaping — THREE PILLARS: FASTEST + FURTHEST + SMOOTHEST.
     // (see rl/env.js for the exact formula). Balance terms are deliberately
     // MINIMAL — just enough to stop faceplanting/flailing and to keep the
