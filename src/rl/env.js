@@ -168,6 +168,11 @@ export class Env {
     this.prevX = 0;
     this.prevAction = null; // last squashed action, for the smoothness penalty
     this.prevSpeeds = null; // last joint speeds (by id), for the jerk penalty
+    // Per-creature effective height gates. Recomputed each reset() from THIS
+    // creature's rest root height (see reset()); seeded here to the raw biped
+    // reference values so they're always defined even before the first reset.
+    this.fallHeight = CONFIG.RL.fallHeight;
+    this.targetHeight = CONFIG.RL.targetHeight;
   }
 
   /** Rebuild the sim to its rest pose and return the first observation. */
@@ -181,6 +186,15 @@ export class Env {
     this.prevX = p.x;
     this.prevAction = null;
     this.prevSpeeds = null;
+    // Height gates are CREATURE-RELATIVE. fallHeight/targetHeight in CONFIG.RL are
+    // calibrated to a biped whose root rests ~refHeight up; a worm's root lies on
+    // the floor. Scale both by this creature's own rest height (measured right after
+    // the rebuild, before physics settles) so a low-slung creature isn't flagged
+    // "fallen" at spawn. Biped: restY≈refHeight => scale≈1 => gates unchanged.
+    const rl = CONFIG.RL;
+    const hScale = p.y / rl.refHeight;
+    this.fallHeight = rl.fallHeight * hScale;     // effective fall gate for THIS creature
+    this.targetHeight = rl.targetHeight * hScale; // effective height-penalty target
     return observe(this.sim, this.limits);
   }
 
@@ -250,7 +264,7 @@ export class Env {
     const upright = Math.abs(ang) < rl.uprightThresh;
     const speed = upright ? avgVx : 0; // FASTEST (uncapped, signed)
     const dx = upright ? dxRaw : 0; // FURTHEST (net progress, signed)
-    const heightErr = pos.y - rl.targetHeight;
+    const heightErr = pos.y - this.targetHeight; // per-creature effective target from reset()
 
     const reward =
       rl.aliveBonus +
@@ -263,7 +277,7 @@ export class Env {
       rl.wEnergy * energy;
 
     // --- Termination ---
-    const fell = pos.y < rl.fallHeight;
+    const fell = pos.y < this.fallHeight; // per-creature effective fall gate from reset()
     const toppled = Math.abs(ang) > rl.maxTilt;
     // Step-timeout is OFF when maxEpisodeSteps <= 0 (the default): episodes end
     // ONLY on a fall/tilt, so a good walker can run indefinitely. It re-enables

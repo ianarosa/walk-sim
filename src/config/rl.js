@@ -39,6 +39,11 @@ export const rlConfig = Object.freeze({
     frameSkip: 4, // fixed physics steps per control step
     maxMotorSpeed: 5, // rad/s a |action|=1 commands to a motor (was 8: too violent)
     fallHeight: 0.6, // root y below this => the creature has fallen
+    refHeight: 1.31, // biped rest root height (m) — the CALIBRATION reference for the
+                     // height gates below. fallHeight/targetHeight were tuned to a biped
+                     // whose root rests ~1.31 m up; other morphologies (a worm whose root
+                     // lies on the floor at ~0.15 m) scale BOTH gates by restY/refHeight so
+                     // a low creature isn't judged "fallen" the instant it spawns. See env.js.
     maxTilt: 1.0, // |rootAngle| above this (rad) => toppled
     // Reward shaping — THREE PILLARS: FASTEST + FURTHEST + SMOOTHEST.
     // (see rl/env.js for the exact formula). Balance terms are deliberately
