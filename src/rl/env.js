@@ -174,6 +174,9 @@ export class Env {
     // reference values so they're always defined even before the first reset.
     this.fallHeight = CONFIG.RL.fallHeight;
     this.targetHeight = CONFIG.RL.targetHeight;
+    // Per-creature relaxation of the jitter penalties (see reset()). 1 = full
+    // biped-strength penalty; seeded so it's defined before the first reset.
+    this.smoothScale = 1;
   }
 
   /** Rebuild the sim to its rest pose and return the first observation. */
@@ -196,6 +199,15 @@ export class Env {
     const hScale = p.y / rl.refHeight;
     this.fallHeight = rl.fallHeight * hScale;     // effective fall gate for THIS creature
     this.targetHeight = rl.targetHeight * hScale; // effective height-penalty target
+    // The SMOOTHNESS penalties (wSmooth/wJerk/wEnergy) are biped-calibrated too. A
+    // tall biped looks smooth by moving FEW joints, so a strong jitter tax is right
+    // for it. But a ground creature LOCOMOTES by undulating MANY joints in sequence
+    // (a caterpillar/travelling wave) — high frame-to-frame Δaction by nature — and
+    // that same tax wrongly collapses the wave into a stiff 2-joint hump (the worm's
+    // problem). Relax the jitter penalties for low creatures by the SAME rest-height
+    // ratio, clamped to <=1 so the biped (hScale≈1) is never affected and only a
+    // low-slung creature is freed to ripple. Worm: hScale≈0.11 => ~9x weaker tax.
+    this.smoothScale = Math.min(1, hScale);
     // Per-body REST heights, for the anti-curl termination gate in stepWith().
     // Sampled right after the rebuild (rest pose, before physics settles), so
     // each body's baseline is its designed on-ground height.
@@ -276,11 +288,11 @@ export class Env {
       rl.aliveBonus +
       rl.wVel * speed +
       rl.wProgress * dx -
-      rl.wSmooth * smooth -
-      rl.wJerk * jerk -
+      rl.wSmooth * this.smoothScale * smooth -
+      rl.wJerk * this.smoothScale * jerk -
       rl.wUpright * ang * ang -
       rl.wHeight * heightErr * heightErr -
-      rl.wEnergy * energy;
+      rl.wEnergy * this.smoothScale * energy;
 
     // --- Termination ---
     const fell = pos.y < this.fallHeight; // per-creature effective fall gate from reset()

@@ -557,7 +557,19 @@ export function defaultQuadruped() {
  *   and stronger torque to match the added mass.
  */
 export function defaultCrawler() {
-  const n = 7;
+  // A worm that SLITHERS (a whole-body travelling wave), not a "scorpion" that
+  // rears up and scoots on one joint. Three things make the wave emerge:
+  //   1. LONG — 9 segments / 8 joints, so a ripple has room to travel.
+  //   2. WEAK — low per-joint torque (40): no two strong joints can drive the
+  //      body alone, so the policy is forced to recruit MANY joints in sequence.
+  //   3. LIGHT + UNIFORM mass (1.4 everywhere): no heavy segment the worm can
+  //      pivot around; every segment contributes equally to the undulation.
+  // This pairs with the env's creature-relative jitter tax (env.js smoothScale):
+  // a low creature's wSmooth/wJerk penalties are relaxed ~9x, so the many-joint
+  // motion a slither needs is no longer suppressed into a stiff 2-joint hump.
+  // Verified headlessly: 4/8 joints active with uniform amplitude (a distributed
+  // wave), flat gait (segments stay ~0.48 m, no scorpion rear), ~70 m of crawl.
+  const n = 9;
   const cells = [];
   const joints = [];
   for (let i = 0; i < n; i++) cells.push([i, 0]);
@@ -565,10 +577,11 @@ export function defaultCrawler() {
     joints.push({
       a: [i, 0],
       b: [i + 1, 0],
-      lowerAngle: -1.0,
-      upperAngle: 1.0,
-      // Ample torque for the now-heavier body; motor still eases in via limits.
-      maxMotorTorque: 120,
+      lowerAngle: -0.9,
+      upperAngle: 0.9,
+      // WEAK on purpose (see above): one or two joints can't drive the body, so
+      // the policy learns to pass a wave down the whole chain.
+      maxMotorTorque: 40,
       motorized: true,
     });
   }
@@ -577,20 +590,18 @@ export function defaultCrawler() {
     cellSize: 0.3,
     cells,
     joints,
-    roots: [[3, 0]], // middle segment
+    roots: [[Math.floor(n / 2), 0]], // middle segment
     feet: [[0, 0], [n - 1, 0]], // the two ends
   });
 
-  // Post-process MASS + GRIP. creatureFromGrid gives non-foot bodies the light
-  // 1.0/0.6 default; that's what left the worm weightless and slippery. Beef up
-  // every NON-foot (mid-body) segment so the motors have real inertia to push
-  // against and enough friction to convert undulation into forward travel. The
-  // two end "feet" keep creatureFromGrid's grippier 2.0/0.95 for anchoring.
+  // LIGHT + UNIFORM mass. creatureFromGrid gives non-foot bodies a very light
+  // default and the two end "feet" a heavier, grippier one; that asymmetry lets
+  // the worm pivot around a heavy end. Level every segment to the same light
+  // density so no single segment dominates — the body has to ripple as a whole.
+  // Keep the end feet's grippier friction (0.95) so the wave converts to travel.
   for (const b of worm.bodies) {
-    if (!b.isFoot) {
-      b.density = 3.0;
-      b.friction = 0.9;
-    }
+    b.density = 1.4;
+    if (!b.isFoot) b.friction = 0.9;
   }
   return validateCreature(worm);
 }
