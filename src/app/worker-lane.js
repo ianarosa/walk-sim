@@ -39,6 +39,7 @@ import { Normalizer } from '../rl/nn.js';
 import { ParallelTrainer } from '../rl/trainer-core.js';
 import { averageBrains } from '../rl/brain-merge.js';
 import { cloneCreature } from '../creature.js';
+import { GaitMeter } from './gait-meter.js';
 import { CONFIG } from '../config.js';
 
 // Steps trained per preview tick when running the main-thread FALLBACK. Small,
@@ -83,6 +84,15 @@ export class WorkerLane {
     this._obs = this._env.reset();
     this._obsSize = obsSize(this.sim);
     this._actSize = actSize(this.sim);
+
+    // Live gait-quality meters for the HUD (read-only; see app/gait-meter.js).
+    // Mirrored onto plain fields so lanes.js can read them off `lane.trainer`
+    // exactly like the other stats (episode, bestDistance, …).
+    this._gait = new GaitMeter(this.sim.jointOrder.length);
+    this.engagement = 0; // 0..1 fraction of joints actively working
+    this.posture = 0; // 0..1 how far it's rearing up (0 flat .. 1 at curl trip)
+    this.activeJoints = 0;
+    this.jointCount = this.sim.jointOrder.length;
 
     // --- Shard + merge orchestration state ---
     this._workers = []; // slots: {worker, instances, alive, retried, lastFull, stats}
@@ -491,6 +501,36 @@ export class WorkerLane {
   // --- The per-frame preview step (drop-in for Trainer.tick) -------------
 
   /**
+   * _sampleGait() — fold the current PREVIEW pose into the gait meters. Pure
+   * read-only: reads joint angles + body heights off the display sim, never
+   * writes to it. `engagement` = how much of the body is oscillating; `rear`
+   * = the highest any body has risen above its own rest height as a fraction
+   * of curlMargin (the height the env treats as a "scorpion" curl).
+   */
+  _sampleGait() {
+    const order = this.sim.jointOrder;
+    const n = order.length;
+    const angObj = this.sim.jointAngles();
+    const angles = new Array(n);
+    for (let i = 0; i < n; i++) angles[i] = angObj[order[i]];
+    let rear = 0;
+    const margin = CONFIG.RL.curlMargin;
+    const restY = this._env.restY;
+    if (margin > 0 && restY) {
+      for (const [id, b] of this.sim.bodies) {
+        const rest = restY[id];
+        if (rest == null) continue;
+        const up = (b.getPosition().y - rest) / margin;
+        if (up > rear) rear = up;
+      }
+    }
+    this._gait.sample(angles, rear);
+    this.engagement = this._gait.engagement;
+    this.posture = this._gait.posture;
+    this.activeJoints = this._gait.activeJoints;
+  }
+
+  /**
    * tick() — advance the PREVIEW one control step with the current greedy brain,
    * resetting the display sim on a fall/tilt so the retry loop is visible. In
    * FALLBACK mode it also trains a little on the main thread. Returns a light
@@ -525,9 +565,16 @@ export class WorkerLane {
     }
 
     if (res.done) {
+      // Episode ended: clear the gait window so the snap-back to the start
+      // pose isn't counted as motion, and zero the readouts for this frame.
+      this._gait.reset();
+      this.engagement = 0;
+      this.posture = 0;
+      this.activeJoints = 0;
       this._obs = this._env.reset();
       return { done: true, distance: res.distance };
     }
+    this._sampleGait();
     return { done: false, distance: res.distance };
   }
 

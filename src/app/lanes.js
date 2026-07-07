@@ -346,6 +346,38 @@ export class LaneManager {
         (t.exploit ? '  ·  exploit' : '');
     ctx.fillText(line, r.x + 16, r.y + 26);
 
+    // --- Gait-quality gauge (bottom-left): two 0..1 bars that make the
+    // otherwise-invisible gait legible at a glance. BODY = how much of the
+    // body is actively working (more/accent-blue = a whole-body wave, not a
+    // stiff 2-joint hump); REARING = how far it's curling up toward the
+    // anti-curl reset (empty/flat = good, full/pink = about to topple — the
+    // same pink as the RESET flash, so a filling bar previews the reset).
+    // Drawn only where there's room, so the thin bottom-strip cells stay clean.
+    const gEng = typeof t.engagement === 'number' ? t.engagement : null;
+    if (gEng != null && !lane.error && r.w >= 150 && r.h >= 130) {
+      const gx = r.x + 16;
+      const bh = 5; // bar height (px)
+      const rowH = 15; // vertical stride between the two bars
+      const gy = r.y + r.h - 14 - rowH * 2; // stack both bars above the bottom edge
+      const labelW = 58; // width reserved for the bar's text label
+      const trackW = Math.max(28, Math.min(120, r.w - 32) - labelW);
+      const drawBar = (yy, labelTxt, frac, fillStyle) => {
+        ctx.font = '700 8px system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = T.labelMuted;
+        ctx.fillText(labelTxt, gx, yy + bh / 2);
+        const tx = gx + labelW;
+        ctx.fillStyle = 'rgba(10,14,40,0.35)';
+        ctx.fillRect(tx, yy, trackW, bh);
+        const f = Math.max(0, Math.min(1, frac));
+        ctx.fillStyle = fillStyle;
+        ctx.fillRect(tx, yy, trackW * f, bh);
+      };
+      drawBar(gy, 'BODY', gEng, T.accent);
+      const post = typeof t.posture === 'number' ? t.posture : 0;
+      drawBar(gy + rowH, 'REARING', post, T.reset);
+    }
+
     // Fall -> reset flash: a brief translucent wash + "RESET" so the user can
     // SEE the retry loop each time the creature topples and snaps to start.
     if (lane.resetFlash > 0) {
